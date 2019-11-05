@@ -129,7 +129,7 @@ func (p *PrometheusStore) putBuffer(b *[]byte) {
 	p.buffers.Put(b)
 }
 
-// Series returns all series for a requested time range and label matcher.
+// SeriesPtr returns all series for a requested time range and label matcher.
 func (p *PrometheusStore) Series(r *storepb.SeriesRequest, s storepb.Store_SeriesServer) error {
 	externalLabels := p.externalLabels()
 
@@ -232,7 +232,7 @@ func (p *PrometheusStore) handleSampledPrometheusResponse(s storepb.Store_Series
 			return err
 		}
 
-		if err := s.Send(storepb.NewSeriesResponse(&storepb.Series{
+		if err := s.Send(storepb.NewSeriesResponse(&storepb.SeriesPtr{
 			Labels: lset,
 			Chunks: aggregatedChunks,
 		})); err != nil {
@@ -312,7 +312,7 @@ func (p *PrometheusStore) handleStreamedPrometheusResponse(s storepb.Store_Serie
 				series.Chunks[i].Data = nil
 			}
 
-			if err := s.Send(storepb.NewSeriesResponse(&storepb.Series{
+			if err := s.Send(storepb.NewSeriesResponse(&storepb.SeriesPtr{
 				Labels: p.translateAndExtendLabels(series.Labels, externalLabels),
 				Chunks: thanosChks,
 			})); err != nil {
@@ -467,14 +467,14 @@ func (p *PrometheusStore) encodeChunk(ss []prompb.Sample) (storepb.Chunk_Encodin
 
 // translateAndExtendLabels transforms a metrics into a protobuf label set. It additionally
 // attaches the given labels to it, overwriting existing ones on colllision.
-func (p *PrometheusStore) translateAndExtendLabels(m []prompb.Label, extend labels.Labels) []storepb.Label {
-	lset := make([]storepb.Label, 0, len(m)+len(extend))
+func (p *PrometheusStore) translateAndExtendLabels(m []prompb.Label, extend labels.Labels) []storepb.LabelPtr {
+	lset := make([]storepb.LabelPtr, 0, len(m)+len(extend))
 
 	for _, l := range m {
 		if extend.Get(l.Name) != "" {
 			continue
 		}
-		lset = append(lset, storepb.Label{
+		lset = append(lset, storepb.LabelPtr{
 			Name:  l.Name,
 			Value: l.Value,
 		})
@@ -483,9 +483,9 @@ func (p *PrometheusStore) translateAndExtendLabels(m []prompb.Label, extend labe
 	return extendLset(lset, extend)
 }
 
-func extendLset(lset []storepb.Label, extend labels.Labels) []storepb.Label {
+func extendLset(lset []storepb.LabelPtr, extend labels.Labels) []storepb.LabelPtr {
 	for _, l := range extend {
-		lset = append(lset, storepb.Label{
+		lset = append(lset, storepb.LabelPtr{
 			Name:  l.Name,
 			Value: l.Value,
 		})

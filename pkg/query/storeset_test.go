@@ -48,7 +48,7 @@ func (s *testStore) LabelValues(ctx context.Context, r *storepb.LabelValuesReque
 }
 
 type testStoreMeta struct {
-	extlsetFn func(addr string) []storepb.LabelSet
+	extlsetFn func(addr string) []storepb.LabelSetPtr
 	storeType component.StoreAPI
 }
 
@@ -121,15 +121,15 @@ func TestStoreSet_Update(t *testing.T) {
 	stores, err := startTestStores([]testStoreMeta{
 		{
 			storeType: component.Sidecar,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "addr", Value: addr},
 						},
 					},
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "a", Value: "b"},
 						},
 					},
@@ -138,15 +138,15 @@ func TestStoreSet_Update(t *testing.T) {
 		},
 		{
 			storeType: component.Sidecar,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "addr", Value: addr},
 						},
 					},
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "a", Value: "b"},
 						},
 					},
@@ -155,10 +155,10 @@ func TestStoreSet_Update(t *testing.T) {
 		},
 		{
 			storeType: component.Query,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "a", Value: "broken"},
 						},
 					},
@@ -241,16 +241,16 @@ func TestStoreSet_Update(t *testing.T) {
 	stores2, err := startTestStores([]testStoreMeta{
 		{
 			storeType: component.Query,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l1", Value: "v2"},
 							{Name: "l2", Value: "v3"},
 						},
 					},
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l3", Value: "v4"},
 						},
 					},
@@ -260,16 +260,16 @@ func TestStoreSet_Update(t *testing.T) {
 		{
 			// Duplicated Querier, in previous versions it would be deduplicated. Now it should be not.
 			storeType: component.Query,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l1", Value: "v2"},
 							{Name: "l2", Value: "v3"},
 						},
 					},
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l3", Value: "v4"},
 						},
 					},
@@ -278,10 +278,10 @@ func TestStoreSet_Update(t *testing.T) {
 		},
 		{
 			storeType: component.Sidecar,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l1", Value: "v2"},
 							{Name: "l2", Value: "v3"},
 						},
@@ -292,10 +292,10 @@ func TestStoreSet_Update(t *testing.T) {
 		{
 			// Duplicated Sidecar, in previous versions it would be deduplicated. Now it should be not.
 			storeType: component.Sidecar,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l1", Value: "v2"},
 							{Name: "l2", Value: "v3"},
 						},
@@ -306,10 +306,10 @@ func TestStoreSet_Update(t *testing.T) {
 		{
 			// Querier that duplicates with sidecar, in previous versions it would be deduplicated. Now it should be not.
 			storeType: component.Query,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l1", Value: "v2"},
 							{Name: "l2", Value: "v3"},
 						},
@@ -321,10 +321,10 @@ func TestStoreSet_Update(t *testing.T) {
 			// Ruler that duplicates with sidecar, in previous versions it would be deduplicated. Now it should be not.
 			// Warning should be produced.
 			storeType: component.Rule,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l1", Value: "v2"},
 							{Name: "l2", Value: "v3"},
 						},
@@ -335,10 +335,10 @@ func TestStoreSet_Update(t *testing.T) {
 		{
 			// Duplicated Rule, in previous versions it would be deduplicated. Now it should be not. Warning should be produced.
 			storeType: component.Rule,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l1", Value: "v2"},
 							{Name: "l2", Value: "v3"},
 						},
@@ -348,10 +348,10 @@ func TestStoreSet_Update(t *testing.T) {
 		},
 		{
 			// No storeType.
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l1", Value: "no-store-type"},
 							{Name: "l2", Value: "v3"},
 						},
@@ -362,30 +362,30 @@ func TestStoreSet_Update(t *testing.T) {
 		// Two pre v0.8.0 store gateway nodes, they don't have ext labels set.
 		{
 			storeType: component.Store,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{}
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{}
 			},
 		},
 		{
 			storeType: component.Store,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{}
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{}
 			},
 		},
 		// Regression tests against https://github.com/thanos-io/thanos/issues/1632: From v0.8.0 stores advertise labels.
 		// If the object storage handled by store gateway has only one sidecar we used to hitting issue.
 		{
 			storeType: component.Store,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l1", Value: "v2"},
 							{Name: "l2", Value: "v3"},
 						},
 					},
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l3", Value: "v4"},
 						},
 					},
@@ -395,21 +395,21 @@ func TestStoreSet_Update(t *testing.T) {
 		// Stores v0.8.1 has compatibility labels. Check if they are correctly removed.
 		{
 			storeType: component.Store,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l1", Value: "v2"},
 							{Name: "l2", Value: "v3"},
 						},
 					},
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l3", Value: "v4"},
 						},
 					},
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: store.CompatibilityTypeLabelName, Value: "store"},
 						},
 					},
@@ -419,21 +419,21 @@ func TestStoreSet_Update(t *testing.T) {
 		// Duplicated store, in previous versions it would be deduplicated. Now it should be not.
 		{
 			storeType: component.Store,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l1", Value: "v2"},
 							{Name: "l2", Value: "v3"},
 						},
 					},
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l3", Value: "v4"},
 						},
 					},
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: store.CompatibilityTypeLabelName, Value: "store"},
 						},
 					},
@@ -481,10 +481,10 @@ func TestStoreSet_Update_NoneAvailable(t *testing.T) {
 
 	st, err := startTestStores([]testStoreMeta{
 		{
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{
 								Name:  "addr",
 								Value: addr,
@@ -496,10 +496,10 @@ func TestStoreSet_Update_NoneAvailable(t *testing.T) {
 			storeType: component.Sidecar,
 		},
 		{
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{
 								Name:  "addr",
 								Value: addr,

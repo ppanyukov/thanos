@@ -105,7 +105,7 @@ type seriesServer struct {
 	storepb.Store_SeriesServer
 	ctx context.Context
 
-	seriesSet []storepb.Series
+	seriesSet []storepb.SeriesPtr
 	warnings  []string
 }
 
@@ -115,10 +115,12 @@ func (s *seriesServer) Send(r *storepb.SeriesResponse) error {
 		return nil
 	}
 
-	if r.GetSeries() == nil {
+	series := r.GetSeries()
+
+	if series == nil {
 		return errors.New("no seriesSet")
 	}
-	s.seriesSet = append(s.seriesSet, *r.GetSeries())
+	s.seriesSet = append(s.seriesSet, *storepb.SeriesPbToPtr(series))
 	return nil
 }
 
@@ -186,7 +188,7 @@ func (q *querier) Select(params *storage.SelectParams, ms ...*labels.Matcher) (s
 		Aggregates:              queryAggrs,
 		PartialResponseDisabled: !q.partialResponse,
 	}, resp); err != nil {
-		return nil, nil, errors.Wrap(err, "proxy Series()")
+		return nil, nil, errors.Wrap(err, "proxy SeriesPtr()")
 	}
 
 	var warns storage.Warnings
@@ -223,7 +225,7 @@ func (q *querier) Select(params *storage.SelectParams, ms ...*labels.Matcher) (s
 
 // sortDedupLabels re-sorts the set so that the same series with different replica
 // labels are coming right after each other.
-func sortDedupLabels(set []storepb.Series, replicaLabels map[string]struct{}) {
+func sortDedupLabels(set []storepb.SeriesPtr, replicaLabels map[string]struct{}) {
 	for _, s := range set {
 		// Move the replica labels to the very end.
 		sort.Slice(s.Labels, func(i, j int) bool {

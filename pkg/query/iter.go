@@ -22,7 +22,7 @@ type promSeriesSet struct {
 	mint, maxt int64
 	aggr       resAggr
 
-	currLset   []storepb.Label
+	currLset   []storepb.LabelPtr
 	currChunks []storepb.AggrChunk
 }
 
@@ -36,7 +36,7 @@ func (s *promSeriesSet) Next() bool {
 		return false
 	}
 
-	// storage.Series are more strict then SeriesSet: It requires storage.Series to iterate over full series.
+	// storage.SeriesPtr are more strict then SeriesSet: It requires storage.SeriesPtr to iterate over full series.
 	s.currLset, s.currChunks = s.set.At()
 	for {
 		s.done = s.set.Next()
@@ -93,13 +93,13 @@ func translateMatchers(ms ...*labels.Matcher) ([]storepb.LabelMatcher, error) {
 	return res, nil
 }
 
-// storeSeriesSet implements a storepb SeriesSet against a list of storepb.Series.
+// storeSeriesSet implements a storepb SeriesSet against a list of storepb.SeriesPtr.
 type storeSeriesSet struct {
-	series []storepb.Series
+	series []storepb.SeriesPtr
 	i      int
 }
 
-func newStoreSeriesSet(s []storepb.Series) *storeSeriesSet {
+func newStoreSeriesSet(s []storepb.SeriesPtr) *storeSeriesSet {
 	return &storeSeriesSet{series: s, i: -1}
 }
 
@@ -115,12 +115,12 @@ func (storeSeriesSet) Err() error {
 	return nil
 }
 
-func (s storeSeriesSet) At() ([]storepb.Label, []storepb.AggrChunk) {
+func (s storeSeriesSet) At() ([]storepb.LabelPtr, []storepb.AggrChunk) {
 	ser := s.series[s.i]
 	return ser.Labels, ser.Chunks
 }
 
-// chunkSeries implements storage.Series for a series on storepb types.
+// chunkSeries implements storage.SeriesPtr for a series on storepb types.
 type chunkSeries struct {
 	lset       labels.Labels
 	chunks     []storepb.AggrChunk
@@ -128,7 +128,7 @@ type chunkSeries struct {
 	aggr       resAggr
 }
 
-func newChunkSeries(lset []storepb.Label, chunks []storepb.AggrChunk, mint, maxt int64, aggr resAggr) *chunkSeries {
+func newChunkSeries(lset []storepb.LabelPtr, chunks []storepb.AggrChunk, mint, maxt int64, aggr resAggr) *chunkSeries {
 	sort.Slice(chunks, func(i, j int) bool {
 		return chunks[i].MinTime < chunks[j].MinTime
 	})

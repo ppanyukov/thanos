@@ -397,13 +397,13 @@ func (s *promMetadata) Labels() labels.Labels {
 	return s.labels
 }
 
-func (s *promMetadata) LabelsPB() []storepb.Label {
+func (s *promMetadata) LabelsPB() []storepb.LabelPtr {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
-	lset := make([]storepb.Label, 0, len(s.labels))
+	lset := make([]storepb.LabelPtr, 0, len(s.labels))
 	for _, l := range s.labels {
-		lset = append(lset, storepb.Label{
+		lset = append(lset, storepb.LabelPtr{
 			Name:  l.Name,
 			Value: l.Value,
 		})

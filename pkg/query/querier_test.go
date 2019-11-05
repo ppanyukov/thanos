@@ -163,7 +163,7 @@ func TestQuerier_Series(t *testing.T) {
 
 	testProxy := &storeServer{
 		resps: []*storepb.SeriesResponse{
-			// Expected sorted  series per seriesSet input. However we Series API allows for single series being chunks across multiple frames.
+			// Expected sorted  series per seriesSet input. However we SeriesPtr API allows for single series being chunks across multiple frames.
 			// This should be handled here.
 			storeSeriesResponse(t, labels.FromStrings("a", "a"), []sample{{0, 0}, {2, 1}, {3, 2}}),
 			storepb.NewWarnSeriesResponse(errors.New("partial error")),
@@ -221,53 +221,53 @@ func TestSortReplicaLabel(t *testing.T) {
 	defer leaktest.CheckTimeout(t, 10*time.Second)()
 
 	tests := []struct {
-		input       []storepb.Series
-		exp         []storepb.Series
+		input       []storepb.SeriesPtr
+		exp         []storepb.SeriesPtr
 		dedupLabels map[string]struct{}
 	}{
 		// 0 Single deduplication label.
 		{
-			input: []storepb.Series{
-				{Labels: []storepb.Label{
+			input: []storepb.SeriesPtr{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "b", Value: "replica-1"},
 					{Name: "c", Value: "3"},
 				}},
-				{Labels: []storepb.Label{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "b", Value: "replica-1"},
 					{Name: "c", Value: "3"},
 					{Name: "d", Value: "4"},
 				}},
-				{Labels: []storepb.Label{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "b", Value: "replica-1"},
 					{Name: "c", Value: "4"},
 				}},
-				{Labels: []storepb.Label{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "b", Value: "replica-2"},
 					{Name: "c", Value: "3"},
 				}},
 			},
-			exp: []storepb.Series{
-				{Labels: []storepb.Label{
+			exp: []storepb.SeriesPtr{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "c", Value: "3"},
 					{Name: "b", Value: "replica-1"},
 				}},
-				{Labels: []storepb.Label{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "c", Value: "3"},
 					{Name: "b", Value: "replica-2"},
 				}},
-				{Labels: []storepb.Label{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "c", Value: "3"},
 					{Name: "d", Value: "4"},
 					{Name: "b", Value: "replica-1"},
 				}},
-				{Labels: []storepb.Label{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "c", Value: "4"},
 					{Name: "b", Value: "replica-1"},
@@ -277,64 +277,64 @@ func TestSortReplicaLabel(t *testing.T) {
 		},
 		// 1 Multi deduplication labels.
 		{
-			input: []storepb.Series{
-				{Labels: []storepb.Label{
+			input: []storepb.SeriesPtr{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "b", Value: "replica-1"},
 					{Name: "b1", Value: "replica-1"},
 					{Name: "c", Value: "3"},
 				}},
-				{Labels: []storepb.Label{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "b", Value: "replica-1"},
 					{Name: "b1", Value: "replica-1"},
 					{Name: "c", Value: "3"},
 					{Name: "d", Value: "4"},
 				}},
-				{Labels: []storepb.Label{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "b", Value: "replica-1"},
 					{Name: "b1", Value: "replica-1"},
 					{Name: "c", Value: "4"},
 				}},
-				{Labels: []storepb.Label{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "b", Value: "replica-2"},
 					{Name: "b1", Value: "replica-2"},
 					{Name: "c", Value: "3"},
 				}},
-				{Labels: []storepb.Label{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "b", Value: "replica-2"},
 					{Name: "c", Value: "3"},
 				}},
 			},
-			exp: []storepb.Series{
-				{Labels: []storepb.Label{
+			exp: []storepb.SeriesPtr{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "c", Value: "3"},
 					{Name: "b", Value: "replica-1"},
 					{Name: "b1", Value: "replica-1"},
 				}},
-				{Labels: []storepb.Label{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "c", Value: "3"},
 					{Name: "b", Value: "replica-2"},
 				}},
-				{Labels: []storepb.Label{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "c", Value: "3"},
 					{Name: "b", Value: "replica-2"},
 					{Name: "b1", Value: "replica-2"},
 				}},
-				{Labels: []storepb.Label{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "c", Value: "3"},
 					{Name: "d", Value: "4"},
 					{Name: "b", Value: "replica-1"},
 					{Name: "b1", Value: "replica-1"},
 				}},
-				{Labels: []storepb.Label{
+				{Labels: []storepb.LabelPtr{
 					{Name: "a", Value: "1"},
 					{Name: "c", Value: "4"},
 					{Name: "b", Value: "replica-1"},
@@ -369,7 +369,7 @@ func TestDedupSeriesSet(t *testing.T) {
 
 	tests := []struct {
 		input []struct {
-			lset []storepb.Label
+			lset []storepb.LabelPtr
 			vals []sample
 		}
 		exp []struct {
@@ -380,32 +380,32 @@ func TestDedupSeriesSet(t *testing.T) {
 	}{
 		{ // 0 Single dedup label.
 			input: []struct {
-				lset []storepb.Label
+				lset []storepb.LabelPtr
 				vals []sample
 			}{
 				{
-					lset: []storepb.Label{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-1"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-1"}},
 					vals: []sample{{10000, 1}, {20000, 2}},
 				}, {
-					lset: []storepb.Label{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-2"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-2"}},
 					vals: []sample{{60000, 3}, {70000, 4}},
 				}, {
-					lset: []storepb.Label{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-3"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-3"}},
 					vals: []sample{{200000, 5}, {210000, 6}},
 				}, {
-					lset: []storepb.Label{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "d", Value: "4"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "d", Value: "4"}},
 					vals: []sample{{10000, 1}, {20000, 2}},
 				}, {
-					lset: []storepb.Label{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}},
 					vals: []sample{{10000, 1}, {20000, 2}},
 				}, {
-					lset: []storepb.Label{{Name: "a", Value: "1"}, {Name: "c", Value: "4"}, {Name: "replica", Value: "replica-1"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "1"}, {Name: "c", Value: "4"}, {Name: "replica", Value: "replica-1"}},
 					vals: []sample{{10000, 1}, {20000, 2}},
 				}, {
-					lset: []storepb.Label{{Name: "a", Value: "2"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-3"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "2"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-3"}},
 					vals: []sample{{10000, 1}, {20000, 2}},
 				}, {
-					lset: []storepb.Label{{Name: "a", Value: "2"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-3"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "2"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-3"}},
 					vals: []sample{{60000, 3}, {70000, 4}},
 				},
 			},
@@ -440,32 +440,32 @@ func TestDedupSeriesSet(t *testing.T) {
 		},
 		{ // 1 Multi dedup label.
 			input: []struct {
-				lset []storepb.Label
+				lset []storepb.LabelPtr
 				vals []sample
 			}{
 				{
-					lset: []storepb.Label{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-1"}, {Name: "replicaA", Value: "replica-1"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-1"}, {Name: "replicaA", Value: "replica-1"}},
 					vals: []sample{{10000, 1}, {20000, 2}},
 				}, {
-					lset: []storepb.Label{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-2"}, {Name: "replicaA", Value: "replica-2"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-2"}, {Name: "replicaA", Value: "replica-2"}},
 					vals: []sample{{60000, 3}, {70000, 4}},
 				}, {
-					lset: []storepb.Label{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-3"}, {Name: "replicaA", Value: "replica-3"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-3"}, {Name: "replicaA", Value: "replica-3"}},
 					vals: []sample{{200000, 5}, {210000, 6}},
 				}, {
-					lset: []storepb.Label{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "d", Value: "4"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "d", Value: "4"}},
 					vals: []sample{{10000, 1}, {20000, 2}},
 				}, {
-					lset: []storepb.Label{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}},
 					vals: []sample{{10000, 1}, {20000, 2}},
 				}, {
-					lset: []storepb.Label{{Name: "a", Value: "1"}, {Name: "c", Value: "4"}, {Name: "replica", Value: "replica-1"}, {Name: "replicaA", Value: "replica-1"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "1"}, {Name: "c", Value: "4"}, {Name: "replica", Value: "replica-1"}, {Name: "replicaA", Value: "replica-1"}},
 					vals: []sample{{10000, 1}, {20000, 2}},
 				}, {
-					lset: []storepb.Label{{Name: "a", Value: "2"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-3"}, {Name: "replicaA", Value: "replica-3"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "2"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-3"}, {Name: "replicaA", Value: "replica-3"}},
 					vals: []sample{{10000, 1}, {20000, 2}},
 				}, {
-					lset: []storepb.Label{{Name: "a", Value: "2"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-3"}, {Name: "replicaA", Value: "replica-3"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "2"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-3"}, {Name: "replicaA", Value: "replica-3"}},
 					vals: []sample{{60000, 3}, {70000, 4}},
 				},
 			},
@@ -501,14 +501,14 @@ func TestDedupSeriesSet(t *testing.T) {
 		},
 		{ // 2 Multi dedup label - some series don't have all dedup labels.
 			input: []struct {
-				lset []storepb.Label
+				lset []storepb.LabelPtr
 				vals []sample
 			}{
 				{
-					lset: []storepb.Label{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-1"}, {Name: "replicaA", Value: "replica-1"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-1"}, {Name: "replicaA", Value: "replica-1"}},
 					vals: []sample{{10000, 1}, {20000, 2}},
 				}, {
-					lset: []storepb.Label{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-2"}},
+					lset: []storepb.LabelPtr{{Name: "a", Value: "1"}, {Name: "c", Value: "3"}, {Name: "replica", Value: "replica-2"}},
 					vals: []sample{{60000, 3}, {70000, 4}},
 				},
 			},
@@ -530,14 +530,14 @@ func TestDedupSeriesSet(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run("", func(t *testing.T) {
-			var series []storepb.Series
+			var series []storepb.SeriesPtr
 			for _, c := range test.input {
 				chk := chunkenc.NewXORChunk()
 				app, _ := chk.Appender()
 				for _, s := range c.vals {
 					app.Append(s.t, s.v)
 				}
-				series = append(series, storepb.Series{
+				series = append(series, storepb.SeriesPtr{
 					Labels: c.lset,
 					Chunks: []storepb.AggrChunk{
 						{Raw: &storepb.Chunk{Type: storepb.Chunk_XOR, Data: chk.Bytes()}},
@@ -719,10 +719,10 @@ func (s *storeServer) Series(r *storepb.SeriesRequest, srv storepb.Store_SeriesS
 
 // storeSeriesResponse creates test storepb.SeriesResponse that includes series with single chunk that stores all the given samples.
 func storeSeriesResponse(t testing.TB, lset labels.Labels, smplChunks ...[]sample) *storepb.SeriesResponse {
-	var s storepb.Series
+	var s storepb.SeriesPtr
 
 	for _, l := range lset {
-		s.Labels = append(s.Labels, storepb.Label{Name: l.Name, Value: l.Value})
+		s.Labels = append(s.Labels, storepb.LabelPtr{Name: l.Name, Value: l.Value})
 	}
 
 	for _, smpls := range smplChunks {

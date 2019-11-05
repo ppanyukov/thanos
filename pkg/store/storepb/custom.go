@@ -6,6 +6,96 @@ import (
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
+func SeriesPbToPtr(series *Series) *SeriesPtr {
+	return &SeriesPtr{
+		Labels: LabelPbSliceToPtr(series.Labels),
+		Chunks: series.Chunks,
+	}
+}
+
+func LabelPtrSliceToPb(labels []LabelPtr) []Label {
+	res := make([]Label, 0, len(labels))
+	for _, label := range labels {
+		res = append(res, *label.ToPb())
+	}
+	return res
+}
+
+func LabelPbSliceToPtr(labels []Label) []LabelPtr {
+	res := make([]LabelPtr, 0, len(labels))
+	for _, label := range labels {
+		labelPtr := LabelPtr{
+			Name:  label.Name,
+			Value: label.Value,
+		}
+		res = append(res, labelPtr)
+	}
+	return res
+}
+
+func LabelSetPtrSliceToPb(labelSets []LabelSetPtr) []LabelSet {
+	res := make([]LabelSet, 0, len(labelSets))
+	for _, labelSet := range labelSets {
+		res = append(res, *labelSet.ToPb())
+	}
+	return res
+}
+
+
+func LabelSetPbSliceToPtr(labelSets []LabelSet) []LabelSetPtr {
+	res := make([]LabelSetPtr, 0, len(labelSets))
+	for _, labelSet := range labelSets {
+		labelSetPtr := LabelSetPtr{
+			Labels:LabelPbSliceToPtr(labelSet.Labels),
+		}
+		res = append(res, labelSetPtr)
+	}
+	return res
+}
+
+
+type LabelPtr struct {
+	Name  string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Value string `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+}
+
+func (label *LabelPtr) ToPb() *Label {
+	return &Label{
+		Name:  label.Name,
+		Value: label.Value,
+	}
+}
+
+func (label *LabelPtr) String() string {
+	return label.ToPb().String()
+}
+
+type LabelSetPtr struct {
+	Labels []LabelPtr `protobuf:"bytes,1,rep,name=labels,proto3" json:"labels"`
+}
+
+func (lbs *LabelSetPtr) ToPb() *LabelSet {
+	return &LabelSet{
+		Labels: LabelPtrSliceToPb(lbs.Labels),
+	}
+}
+
+func (lbs *LabelSetPtr) String() string {
+	return lbs.ToPb().String()
+}
+
+type SeriesPtr struct {
+	Labels []LabelPtr  `protobuf:"bytes,1,rep,name=labels,proto3" json:"labels"`
+	Chunks []AggrChunk `protobuf:"bytes,2,rep,name=chunks,proto3" json:"chunks"`
+}
+
+func (s *SeriesPtr) ToPb() *Series {
+	return &Series{
+		Labels: LabelPtrSliceToPb(s.Labels),
+		Chunks: s.Chunks,
+	}
+}
+
 var PartialResponseStrategyValues = func() []string {
 	var s []string
 	for k := range PartialResponseStrategy_value {
@@ -22,16 +112,16 @@ func NewWarnSeriesResponse(err error) *SeriesResponse {
 	}
 }
 
-func NewSeriesResponse(series *Series) *SeriesResponse {
+func NewSeriesResponse(series *SeriesPtr) *SeriesResponse {
 	return &SeriesResponse{
 		Result: &SeriesResponse_Series{
-			Series: series,
+			Series: series.ToPb(),
 		},
 	}
 }
 
 // CompareLabels compares two sets of labels.
-func CompareLabels(a, b []Label) int {
+func CompareLabels(a, b []LabelPtr) int {
 	l := len(a)
 	if len(b) < l {
 		l = len(b)
@@ -50,9 +140,9 @@ func CompareLabels(a, b []Label) int {
 
 type emptySeriesSet struct{}
 
-func (emptySeriesSet) Next() bool                 { return false }
-func (emptySeriesSet) At() ([]Label, []AggrChunk) { return nil, nil }
-func (emptySeriesSet) Err() error                 { return nil }
+func (emptySeriesSet) Next() bool                    { return false }
+func (emptySeriesSet) At() ([]LabelPtr, []AggrChunk) { return nil, nil }
+func (emptySeriesSet) Err() error                    { return nil }
 
 // EmptySeriesSet returns a new series set that contains no series.
 func EmptySeriesSet() SeriesSet {
@@ -79,7 +169,7 @@ func MergeSeriesSets(all ...SeriesSet) SeriesSet {
 // The set is sorted by the label sets. Chunks may be overlapping or expected of order.
 type SeriesSet interface {
 	Next() bool
-	At() ([]Label, []AggrChunk)
+	At() ([]LabelPtr, []AggrChunk)
 	Err() error
 }
 
@@ -87,13 +177,13 @@ type SeriesSet interface {
 type mergedSeriesSet struct {
 	a, b SeriesSet
 
-	lset         []Label
+	lset         []LabelPtr
 	chunks       []AggrChunk
 	adone, bdone bool
 }
 
 // newMergedSeriesSet takes two series sets as a single series set.
-// Series that occur in both sets should have disjoint time ranges.
+// SeriesPtr that occur in both sets should have disjoint time ranges.
 // If the ranges overlap b samples are appended to a samples.
 // If the single SeriesSet returns same series within many iterations,
 // merge series set will not try to merge those.
@@ -107,7 +197,7 @@ func newMergedSeriesSet(a, b SeriesSet) *mergedSeriesSet {
 	return s
 }
 
-func (s *mergedSeriesSet) At() ([]Label, []AggrChunk) {
+func (s *mergedSeriesSet) At() ([]LabelPtr, []AggrChunk) {
 	return s.lset, s.chunks
 }
 
@@ -163,7 +253,7 @@ func (s *mergedSeriesSet) Next() bool {
 	return true
 }
 
-func LabelsToPromLabels(lset []Label) labels.Labels {
+func LabelsToPromLabels(lset []LabelPtr) labels.Labels {
 	ret := make(labels.Labels, len(lset))
 	for i, l := range lset {
 		ret[i] = labels.Label{Name: l.Name, Value: l.Value}
@@ -172,7 +262,7 @@ func LabelsToPromLabels(lset []Label) labels.Labels {
 	return ret
 }
 
-func LabelsToString(lset []Label) string {
+func LabelsToString(lset []LabelPtr) string {
 	var s []string
 	for _, l := range lset {
 		s = append(s, l.String())
@@ -180,7 +270,7 @@ func LabelsToString(lset []Label) string {
 	return "[" + strings.Join(s, ",") + "]"
 }
 
-func LabelSetsToString(lsets []LabelSet) string {
+func LabelSetsToString(lsets []LabelSetPtr) string {
 	s := []string{}
 	for _, ls := range lsets {
 		s = append(s, LabelsToString(ls.Labels))

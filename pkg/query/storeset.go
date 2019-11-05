@@ -32,14 +32,14 @@ type StoreSpec interface {
 	// If metadata call fails we assume that store is no longer accessible and we should not use it.
 	// NOTE: It is implementation responsibility to retry until context timeout, but a caller responsibility to manage
 	// given store connection.
-	Metadata(ctx context.Context, client storepb.StoreClient) (labelSets []storepb.LabelSet, mint int64, maxt int64, storeType component.StoreAPI, err error)
+	Metadata(ctx context.Context, client storepb.StoreClient) (labelSets []storepb.LabelSetPtr, mint int64, maxt int64, storeType component.StoreAPI, err error)
 }
 
 type StoreStatus struct {
 	Name      string
 	LastCheck time.Time
 	LastError error
-	LabelSets []storepb.LabelSet
+	LabelSets []storepb.LabelSetPtr
 	StoreType component.StoreAPI
 	MinTime   int64
 	MaxTime   int64
@@ -62,7 +62,7 @@ func (s *grpcStoreSpec) Addr() string {
 
 // Metadata method for gRPC store API tries to reach host Info method until context timeout. If we are unable to get metadata after
 // that time, we assume that the host is unhealthy and return error.
-func (s *grpcStoreSpec) Metadata(ctx context.Context, client storepb.StoreClient) (labelSets []storepb.LabelSet, mint int64, maxt int64, storeType component.StoreAPI, err error) {
+func (s *grpcStoreSpec) Metadata(ctx context.Context, client storepb.StoreClient) (labelSets []storepb.LabelSetPtr, mint int64, maxt int64, storeType component.StoreAPI, err error) {
 	resp, err := client.Info(ctx, &storepb.InfoRequest{}, grpc.WaitForReady(true))
 	if err != nil {
 		return nil, 0, 0, nil, errors.Wrapf(err, "fetching store info from %s", s.addr)
@@ -71,7 +71,7 @@ func (s *grpcStoreSpec) Metadata(ctx context.Context, client storepb.StoreClient
 		resp.LabelSets = []storepb.LabelSet{{Labels: resp.Labels}}
 	}
 
-	return resp.LabelSets, resp.MinTime, resp.MaxTime, component.FromProto(resp.StoreType), nil
+	return storepb.LabelSetPbSliceToPtr(resp.LabelSets), resp.MinTime, resp.MaxTime, component.FromProto(resp.StoreType), nil
 }
 
 // storeSetNodeCollector is metric collector for Guge indicated number of available storeAPIs for Querier.
@@ -209,7 +209,7 @@ type storeRef struct {
 	addr string
 
 	// Meta (can change during runtime).
-	labelSets []storepb.LabelSet
+	labelSets []storepb.LabelSetPtr
 	storeType component.StoreAPI
 	minTime   int64
 	maxTime   int64
@@ -217,7 +217,7 @@ type storeRef struct {
 	logger log.Logger
 }
 
-func (s *storeRef) Update(labelSets []storepb.LabelSet, minTime int64, maxTime int64, storeType component.StoreAPI) {
+func (s *storeRef) Update(labelSets []storepb.LabelSetPtr, minTime int64, maxTime int64, storeType component.StoreAPI) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
@@ -234,11 +234,11 @@ func (s *storeRef) StoreType() component.StoreAPI {
 	return s.storeType
 }
 
-func (s *storeRef) LabelSets() []storepb.LabelSet {
+func (s *storeRef) LabelSets() []storepb.LabelSetPtr {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 
-	labelSet := make([]storepb.LabelSet, 0, len(s.labelSets))
+	labelSet := make([]storepb.LabelSetPtr, 0, len(s.labelSets))
 	for _, ls := range s.labelSets {
 		if len(ls.Labels) == 0 {
 			continue
@@ -248,14 +248,14 @@ func (s *storeRef) LabelSets() []storepb.LabelSet {
 			continue
 		}
 
-		lbls := make([]storepb.Label, 0, len(ls.Labels))
+		lbls := make([]storepb.LabelPtr, 0, len(ls.Labels))
 		for _, l := range ls.Labels {
-			lbls = append(lbls, storepb.Label{
+			lbls = append(lbls, storepb.LabelPtr{
 				Name:  l.Name,
 				Value: l.Value,
 			})
 		}
-		labelSet = append(labelSet, storepb.LabelSet{Labels: lbls})
+		labelSet = append(labelSet, storepb.LabelSetPtr{Labels: lbls})
 	}
 	return labelSet
 }

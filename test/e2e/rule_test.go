@@ -212,15 +212,15 @@ func (a *failingStoreAPI) Info(context.Context, *storepb.InfoRequest) (*storepb.
 	return &storepb.InfoResponse{
 		MinTime: math.MinInt64,
 		MaxTime: math.MaxInt64,
-		Labels: []storepb.Label{
+		Labels: []storepb.LabelPtr{
 			{
 				Name:  "magic",
 				Value: "store_api",
 			},
 		},
-		LabelSets: []storepb.LabelSet{
+		LabelSets: []storepb.LabelSetPtr{
 			{
-				Labels: []storepb.Label{
+				Labels: []storepb.LabelPtr{
 					{
 						Name:  "magic",
 						Value: "store_api",
@@ -228,7 +228,7 @@ func (a *failingStoreAPI) Info(context.Context, *storepb.InfoRequest) (*storepb.
 				},
 			},
 			{
-				Labels: []storepb.Label{
+				Labels: []storepb.LabelPtr{
 					{
 						Name:  "magicmarker",
 						Value: "store_api",

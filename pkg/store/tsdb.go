@@ -70,7 +70,7 @@ func (s *TSDBStore) Info(ctx context.Context, r *storepb.InfoRequest) (*storepb.
 	return res, nil
 }
 
-// Series returns all series for a requested time range and label matcher. The returned data may
+// SeriesPtr returns all series for a requested time range and label matcher. The returned data may
 // exceed the requested time bounds.
 func (s *TSDBStore) Series(r *storepb.SeriesRequest, srv storepb.Store_SeriesServer) error {
 	match, newMatchers, err := matchesExternalLabels(r.Matchers, s.externalLabels)
@@ -102,7 +102,7 @@ func (s *TSDBStore) Series(r *storepb.SeriesRequest, srv storepb.Store_SeriesSer
 		return status.Error(codes.Internal, err.Error())
 	}
 
-	var respSeries storepb.Series
+	var respSeries storepb.SeriesPtr
 
 	for set.Next() {
 		series := set.At()
@@ -173,20 +173,20 @@ func (s *TSDBStore) encodeChunks(it tsdb.SeriesIterator, maxSamplesPerChunk int)
 
 // translateAndExtendLabels transforms a metrics into a protobuf label set. It additionally
 // attaches the given labels to it, overwriting existing ones on collision.
-func (s *TSDBStore) translateAndExtendLabels(m, extend labels.Labels) []storepb.Label {
-	lset := make([]storepb.Label, 0, len(m)+len(extend))
+func (s *TSDBStore) translateAndExtendLabels(m, extend labels.Labels) []storepb.LabelPtr {
+	lset := make([]storepb.LabelPtr, 0, len(m)+len(extend))
 
 	for _, l := range m {
 		if extend.Get(l.Name) != "" {
 			continue
 		}
-		lset = append(lset, storepb.Label{
+		lset = append(lset, storepb.LabelPtr{
 			Name:  l.Name,
 			Value: l.Value,
 		})
 	}
 	for _, l := range extend {
-		lset = append(lset, storepb.Label{
+		lset = append(lset, storepb.LabelPtr{
 			Name:  l.Name,
 			Value: l.Value,
 		})

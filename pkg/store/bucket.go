@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-kit/kit/log"
@@ -228,14 +229,14 @@ type BucketStore struct {
 	// Query gate which limits the maximum amount of concurrent queries.
 	queryGate *Gate
 
-	// samplesLimiter limits the number of samples per each Series() call.
+	// samplesLimiter limits the number of samples per each SeriesPtr() call.
 	samplesLimiter *Limiter
 	partitioner    partitioner
 
 	filterConfig  *FilterConfig
 	relabelConfig []*relabel.Config
 
-	advLabelSets             []storepb.LabelSet
+	advLabelSets             []storepb.LabelSetPtr
 	enableCompatibilityLabel bool
 }
 
@@ -399,15 +400,15 @@ func (s *BucketStore) SyncBlocks(ctx context.Context) error {
 	}
 
 	// Sync advertise labels.
-	var storeLabels []storepb.Label
+	var storeLabels []storepb.LabelPtr
 	s.mtx.Lock()
 	s.advLabelSets = s.advLabelSets[:0]
 	for _, bs := range s.blockSets {
 		storeLabels := storeLabels[:0]
 		for _, l := range bs.labels {
-			storeLabels = append(storeLabels, storepb.Label{Name: l.Name, Value: l.Value})
+			storeLabels = append(storeLabels, storepb.LabelPtr{Name: l.Name, Value: l.Value})
 		}
-		s.advLabelSets = append(s.advLabelSets, storepb.LabelSet{Labels: storeLabels})
+		s.advLabelSets = append(s.advLabelSets, storepb.LabelSetPtr{Labels: storeLabels})
 	}
 	sort.Slice(s.advLabelSets, func(i, j int) bool {
 		return strings.Compare(s.advLabelSets[i].String(), s.advLabelSets[j].String()) < 0
@@ -576,7 +577,7 @@ func (s *BucketStore) Info(context.Context, *storepb.InfoRequest) (*storepb.Info
 
 	s.mtx.RLock()
 	// Should we clone?
-	res.LabelSets = s.advLabelSets
+	res.LabelSets = storepb.LabelSetPtrSliceToPb(s.advLabelSets)
 	s.mtx.RUnlock()
 
 	if s.enableCompatibilityLabel && len(res.LabelSets) > 0 {
@@ -608,7 +609,7 @@ func (s *BucketStore) limitMaxTime(maxt int64) int64 {
 }
 
 type seriesEntry struct {
-	lset []storepb.Label
+	lset []storepb.LabelPtr
 	refs []uint64
 	chks []storepb.AggrChunk
 }
@@ -634,7 +635,7 @@ func (s *bucketSeriesSet) Next() bool {
 	return true
 }
 
-func (s *bucketSeriesSet) At() ([]storepb.Label, []storepb.AggrChunk) {
+func (s *bucketSeriesSet) At() ([]storepb.LabelPtr, []storepb.AggrChunk) {
 	return s.set[s.i].lset, s.set[s.i].chks
 }
 
@@ -680,7 +681,7 @@ func blockSeries(
 			return nil, nil, errors.Wrap(err, "read series")
 		}
 		s := seriesEntry{
-			lset: make([]storepb.Label, 0, len(lset)+len(extLset)),
+			lset: make([]storepb.LabelPtr, 0, len(lset)+len(extLset)),
 			refs: make([]uint64, 0, len(chks)),
 			chks: make([]storepb.AggrChunk, 0, len(chks)),
 		}
@@ -690,13 +691,13 @@ func blockSeries(
 			if extLset[l.Name] != "" {
 				continue
 			}
-			s.lset = append(s.lset, storepb.Label{
+			s.lset = append(s.lset, storepb.LabelPtr{
 				Name:  l.Name,
 				Value: l.Value,
 			})
 		}
 		for ln, lv := range extLset {
-			s.lset = append(s.lset, storepb.Label{
+			s.lset = append(s.lset, storepb.LabelPtr{
 				Name:  ln,
 				Value: lv,
 			})
@@ -831,8 +832,14 @@ func debugFoundBlockSetOverview(logger log.Logger, mint, maxt, maxResolutionMill
 	level.Debug(logger).Log("msg", "Blocks source resolutions", "blocks", len(bs), "Maximum Resolution", maxResolutionMillis, "mint", mint, "maxt", maxt, "lset", lset.String(), "spans", strings.Join(parts, "\n"))
 }
 
-// Series implements the storepb.StoreServer interface.
+var seriesCallCount = int64(0)
+
+// SeriesPtr implements the storepb.StoreServer interface.
 func (s *BucketStore) Series(req *storepb.SeriesRequest, srv storepb.Store_SeriesServer) (err error) {
+	thisCallNumber := atomic.AddInt64(&seriesCallCount, 1)
+	runutil.HeapDump(fmt.Sprintf("heap-series-%d-before", thisCallNumber))
+	defer runutil.HeapDump(fmt.Sprintf("heap-series-%d-after", thisCallNumber))
+	
 	{
 		span, _ := tracing.StartSpan(srv.Context(), "store_query_gate_ismyturn")
 		err := s.queryGate.IsMyTurn(srv.Context())
@@ -879,7 +886,7 @@ func (s *BucketStore) Series(req *storepb.SeriesRequest, srv storepb.Store_Serie
 			indexr := b.indexReader(ctx)
 			chunkr := b.chunkReader(ctx)
 
-			// Defer all closes to the end of Series method.
+			// Defer all closes to the end of SeriesPtr method.
 			defer runutil.CloseWithLogOnErr(s.logger, indexr, "series block")
 			defer runutil.CloseWithLogOnErr(s.logger, chunkr, "series block")
 
@@ -954,7 +961,7 @@ func (s *BucketStore) Series(req *storepb.SeriesRequest, srv storepb.Store_Serie
 		// This must be accounted for later by clients.
 		set := storepb.MergeSeriesSets(res...)
 		for set.Next() {
-			var series storepb.Series
+			var series storepb.SeriesPtr
 
 			series.Labels, series.Chunks = set.At()
 
@@ -1395,7 +1402,7 @@ func (r *bucketIndexReader) lookupSymbol(o uint32) (string, error) {
 // ExpandedPostings returns postings in expanded list instead of index.Postings.
 // This is because we need to have them buffered anyway to perform efficient lookup
 // on object storage.
-// Found posting IDs (ps) are not strictly required to point to a valid Series, e.g. during
+// Found posting IDs (ps) are not strictly required to point to a valid SeriesPtr, e.g. during
 // background garbage collections.
 //
 // Reminder: A posting is a reference (represented as a uint64) to a series reference, which in turn points to the first

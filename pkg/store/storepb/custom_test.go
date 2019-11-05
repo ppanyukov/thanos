@@ -15,15 +15,15 @@ type sample struct {
 }
 
 type listSeriesSet struct {
-	series []Series
+	series []SeriesPtr
 	idx    int
 }
 
-func newSeries(t *testing.T, lset labels.Labels, smplChunks [][]sample) Series {
-	var s Series
+func newSeries(t *testing.T, lset labels.Labels, smplChunks [][]sample) SeriesPtr {
+	var s SeriesPtr
 
 	for _, l := range lset {
-		s.Labels = append(s.Labels, Label{Name: l.Name, Value: l.Value})
+		s.Labels = append(s.Labels, LabelPtr{Name: l.Name, Value: l.Value})
 	}
 
 	for _, smpls := range smplChunks {
@@ -47,7 +47,7 @@ func newSeries(t *testing.T, lset labels.Labels, smplChunks [][]sample) Series {
 }
 
 func newListSeriesSet(t *testing.T, raw []rawSeries) *listSeriesSet {
-	var series []Series
+	var series []SeriesPtr
 	for _, s := range raw {
 		series = append(series, newSeries(t, s.lset, s.chunks))
 	}
@@ -62,7 +62,7 @@ func (s *listSeriesSet) Next() bool {
 	return s.idx < len(s.series)
 }
 
-func (s *listSeriesSet) At() ([]Label, []AggrChunk) {
+func (s *listSeriesSet) At() ([]LabelPtr, []AggrChunk) {
 	if s.idx < 0 || s.idx >= len(s.series) {
 		return nil, nil
 	}
@@ -76,7 +76,7 @@ type errSeriesSet struct{ err error }
 
 func (errSeriesSet) Next() bool { return false }
 
-func (errSeriesSet) At() ([]Label, []AggrChunk) { return nil, nil }
+func (errSeriesSet) At() ([]LabelPtr, []AggrChunk) { return nil, nil }
 
 func (e errSeriesSet) Err() error { return e.err }
 
@@ -229,10 +229,10 @@ type rawSeries struct {
 }
 
 func seriesEquals(t *testing.T, expected []rawSeries, gotSS SeriesSet) {
-	var got []Series
+	var got []SeriesPtr
 	for gotSS.Next() {
 		lset, chks := gotSS.At()
-		got = append(got, Series{Labels: lset, Chunks: chks})
+		got = append(got, SeriesPtr{Labels: lset, Chunks: chks})
 	}
 
 	testutil.Equals(t, len(expected), len(got), "got: %v", got)

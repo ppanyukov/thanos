@@ -54,7 +54,7 @@ func (s *testStore) LabelValues(ctx context.Context, r *storepb.LabelValuesReque
 }
 
 type testStoreMeta struct {
-	extlsetFn func(addr string) []storepb.LabelSet
+	extlsetFn func(addr string) []storepb.LabelSetPtr
 	storeType component.StoreAPI
 }
 
@@ -127,10 +127,10 @@ func TestPre0_8_0_StoreSet_AgainstNewStoreGW(t *testing.T) {
 	st, err := startTestStores([]testStoreMeta{
 		{
 			storeType: component.Sidecar,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l1", Value: "v2"},
 							{Name: "l2", Value: "v3"},
 						},
@@ -140,17 +140,17 @@ func TestPre0_8_0_StoreSet_AgainstNewStoreGW(t *testing.T) {
 		},
 		{
 			storeType: component.Store,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							// This is the labelset exposed by store when having only one sidecar's data.
 							{Name: "l1", Value: "v2"},
 							{Name: "l2", Value: "v3"},
 						},
 					},
 					{
-						Labels: []storepb.Label{{Name: store.CompatibilityTypeLabelName, Value: "store"}},
+						Labels: []storepb.LabelPtr{{Name: store.CompatibilityTypeLabelName, Value: "store"}},
 					},
 				}
 			},
@@ -158,16 +158,16 @@ func TestPre0_8_0_StoreSet_AgainstNewStoreGW(t *testing.T) {
 		// We expect this to be duplicated.
 		{
 			storeType: component.Store,
-			extlsetFn: func(addr string) []storepb.LabelSet {
-				return []storepb.LabelSet{
+			extlsetFn: func(addr string) []storepb.LabelSetPtr {
+				return []storepb.LabelSetPtr{
 					{
-						Labels: []storepb.Label{
+						Labels: []storepb.LabelPtr{
 							{Name: "l1", Value: "v2"},
 							{Name: "l2", Value: "v3"},
 						},
 					},
 					{
-						Labels: []storepb.Label{{Name: store.CompatibilityTypeLabelName, Value: "store"}},
+						Labels: []storepb.LabelPtr{{Name: store.CompatibilityTypeLabelName, Value: "store"}},
 					},
 				}
 			},
@@ -192,9 +192,9 @@ func TestPre0_8_0_StoreSet_AgainstNewStoreGW(t *testing.T) {
 	testutil.Assert(t, len(storeSet.stores) == 2, fmt.Sprintf("all services should respond just fine, but we expect duplicates being blocked. Expected %d stores, got %d", 5, len(storeSet.stores)))
 
 	// Sort result to be able to compare.
-	var existingStoreLabels [][][]storepb.Label
+	var existingStoreLabels [][][]storepb.LabelPtr
 	for _, store := range storeSet.stores {
-		lset := [][]storepb.Label{}
+		lset := [][]storepb.LabelPtr{}
 		for _, ls := range store.LabelSets() {
 			lset = append(lset, ls.Labels)
 		}
@@ -204,7 +204,7 @@ func TestPre0_8_0_StoreSet_AgainstNewStoreGW(t *testing.T) {
 		return len(existingStoreLabels[i]) > len(existingStoreLabels[j])
 	})
 
-	testutil.Equals(t, [][][]storepb.Label{
+	testutil.Equals(t, [][][]storepb.LabelPtr{
 		{
 			{
 				{Name: "l1", Value: "v2"},

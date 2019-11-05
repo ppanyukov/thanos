@@ -51,13 +51,25 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"runtime"
+	"runtime/pprof"
 	"time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/pkg/errors"
 	tsdberrors "github.com/prometheus/prometheus/tsdb/errors"
+	log2 "log"
 )
+
+func HeapDump(name string) {
+	var fName = fmt.Sprintf("/Users/philip/thanos/github.com/ppanyukov/thanos-oom/scripts/%s-change.pb.gz", name)
+	f, _ := os.Create(fName)
+	defer f.Close()
+	runtime.GC()
+	pprof.WriteHeapProfile(f)
+	log2.Printf("WRITTEN HEAP DUMP TO %s\n", fName)
+}
 
 // Repeat executes f every interval seconds until stopc is closed or f returns an error.
 // It executes f once right after being called.

@@ -31,7 +31,7 @@ type Client interface {
 	storepb.StoreClient
 
 	// LabelSets that each apply to some data exposed by the backing store.
-	LabelSets() []storepb.LabelSet
+	LabelSets() []storepb.LabelSetPtr
 
 	// Minimum and maximum time range of data in the store.
 	TimeRange() (mint int64, maxt int64)
@@ -113,7 +113,7 @@ func (s *ProxyStore) Info(ctx context.Context, r *storepb.InfoRequest) (*storepb
 		})
 	}
 
-	labelSets := make(map[uint64][]storepb.Label, len(stores))
+	labelSets := make(map[uint64][]storepb.LabelPtr, len(stores))
 	for _, st := range stores {
 		for _, labelSet := range st.LabelSets() {
 			mergedLabelSet := mergeLabels(labelSet.Labels, s.selectorLabels)
@@ -125,7 +125,7 @@ func (s *ProxyStore) Info(ctx context.Context, r *storepb.InfoRequest) (*storepb
 
 	res.LabelSets = make([]storepb.LabelSet, 0, len(labelSets))
 	for _, v := range labelSets {
-		res.LabelSets = append(res.LabelSets, storepb.LabelSet{Labels: v})
+		res.LabelSets = append(res.LabelSets, storepb.LabelSet{Labels: storepb.LabelPtrSliceToPb(v)})
 	}
 
 	// We always want to enforce announcing the subset of data that
@@ -142,7 +142,7 @@ func (s *ProxyStore) Info(ctx context.Context, r *storepb.InfoRequest) (*storepb
 // mergeLabels merges label-set a and label-selector b with the selector's
 // labels having precedence. The types are distinct because of the inputs at
 // hand where this function is used.
-func mergeLabels(a []storepb.Label, b labels.Labels) []storepb.Label {
+func mergeLabels(a []storepb.LabelPtr, b labels.Labels) []storepb.LabelPtr {
 	ls := map[string]string{}
 	for _, l := range a {
 		ls[l.Name] = l.Value
@@ -151,9 +151,9 @@ func mergeLabels(a []storepb.Label, b labels.Labels) []storepb.Label {
 		ls[l.Name] = l.Value
 	}
 
-	res := []storepb.Label{}
+	res := []storepb.LabelPtr{}
 	for k, v := range ls {
-		res = append(res, storepb.Label{Name: k, Value: v})
+		res = append(res, storepb.LabelPtr{Name: k, Value: v})
 	}
 
 	return res
@@ -178,7 +178,7 @@ func (s ctxRespSender) send(r *storepb.SeriesResponse) {
 	}
 }
 
-// Series returns all series for a requested time range and label matcher. Requested series are taken from other
+// SeriesPtr returns all series for a requested time range and label matcher. Requested series are taken from other
 // stores and proxied to RPC client. NOTE: Resulted data are not trimmed exactly to min and max time range.
 func (s *ProxyStore) Series(r *storepb.SeriesRequest, srv storepb.Store_SeriesServer) error {
 	match, newMatchers, err := matchesExternalLabels(r.Matchers, s.selectorLabels)
@@ -273,7 +273,7 @@ func (s *ProxyStore) Series(r *storepb.SeriesRequest, srv storepb.Store_SeriesSe
 
 		mergedSet := storepb.MergeSeriesSets(seriesSet...)
 		for mergedSet.Next() {
-			var series storepb.Series
+			var series storepb.SeriesPtr
 			series.Labels, series.Chunks = mergedSet.At()
 			respSender.send(storepb.NewSeriesResponse(&series))
 		}
@@ -306,8 +306,8 @@ type streamSeriesSet struct {
 	stream storepb.Store_SeriesClient
 	warnCh warnSender
 
-	currSeries *storepb.Series
-	recvCh     chan *storepb.Series
+	currSeries *storepb.SeriesPtr
+	recvCh     chan *storepb.SeriesPtr
 
 	errMtx sync.Mutex
 	err    error
@@ -336,7 +336,7 @@ func startStreamSeriesSet(
 		closeSeries:     closeSeries,
 		stream:          stream,
 		warnCh:          warnCh,
-		recvCh:          make(chan *storepb.Series, 10),
+		recvCh:          make(chan *storepb.SeriesPtr, 10),
 		name:            name,
 		partialResponse: partialResponse,
 		responseTimeout: responseTimeout,
@@ -372,8 +372,11 @@ func startStreamSeriesSet(
 				continue
 			}
 
+			seriesPb := r.GetSeries()
+			seriesPtr := storepb.SeriesPbToPtr(seriesPb)
+
 			select {
-			case s.recvCh <- r.GetSeries():
+			case s.recvCh <- seriesPtr:
 				continue
 			case <-ctx.Done():
 				return
@@ -419,7 +422,7 @@ func (s *streamSeriesSet) Next() (ok bool) {
 	}
 }
 
-func (s *streamSeriesSet) At() ([]storepb.Label, []storepb.AggrChunk) {
+func (s *streamSeriesSet) At() ([]storepb.LabelPtr, []storepb.AggrChunk) {
 	if s.currSeries == nil {
 		return nil, nil
 	}
@@ -442,7 +445,7 @@ func storeMatches(s Client, mint, maxt int64, matchers ...storepb.LabelMatcher) 
 }
 
 // labelSetsMatch returns false if all label-set do not match the matchers.
-func labelSetsMatch(lss []storepb.LabelSet, matchers []storepb.LabelMatcher) (bool, error) {
+func labelSetsMatch(lss []storepb.LabelSetPtr, matchers []storepb.LabelMatcher) (bool, error) {
 	if len(lss) == 0 {
 		return true, nil
 	}
@@ -460,7 +463,7 @@ func labelSetsMatch(lss []storepb.LabelSet, matchers []storepb.LabelMatcher) (bo
 
 // labelSetMatches returns false if any matcher matches negatively against the
 // respective label-value for the matcher's label-name.
-func labelSetMatches(ls storepb.LabelSet, matchers []storepb.LabelMatcher) (bool, error) {
+func labelSetMatches(ls storepb.LabelSetPtr, matchers []storepb.LabelMatcher) (bool, error) {
 	for _, m := range matchers {
 		for _, l := range ls.Labels {
 			if l.Name != m.Name {
