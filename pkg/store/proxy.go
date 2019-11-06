@@ -17,6 +17,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/prometheus/tsdb/labels"
 	"github.com/thanos-io/thanos/pkg/component"
+	"github.com/thanos-io/thanos/pkg/limit"
 	"github.com/thanos-io/thanos/pkg/store/storepb"
 	"github.com/thanos-io/thanos/pkg/strutil"
 	"github.com/thanos-io/thanos/pkg/tracing"
@@ -344,6 +345,8 @@ func startStreamSeriesSet(
 
 	wg.Add(1)
 	go func() {
+		queryPipeLimiter := limit.NewQueryPipeLimiterNoLock()
+
 		defer wg.Done()
 		defer close(s.recvCh)
 
@@ -352,6 +355,15 @@ func startStreamSeriesSet(
 
 			if err == io.EOF {
 				return
+			}
+
+			// Check receive limits but only if err == nil not to mask any
+			// real issues with limit enforcement errors.
+			if err == nil {
+				err = queryPipeLimiter.AddByteCount(r.Size())
+				if err != nil {
+					level.Info(logger).Log("QUERY_PIPE_LIMIT", "limit reached", "msg", err)
+				}
 			}
 
 			if err != nil {
