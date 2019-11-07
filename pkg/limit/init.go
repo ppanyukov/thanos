@@ -7,44 +7,61 @@ import (
 )
 
 const (
-	envQueryPipeLimit = "QUERY_PIPE_LIMIT"
+	envQueryPipeLimit  = "QUERY_PIPE_LIMIT"
+	envQueryTotalLimit = "QUERY_TOTAL_LIMIT"
 )
 
 var (
-	// queryPipeLimit is the total number of bytes querier can receive from one given source.
+	// queryPipeLimit is the number of bytes querier can receive from one given source.
 	// zero or negative == no limit
 	queryPipeLimit int64
+
+	// queryTotalLimit is the total number of bytes querier can receive from all sources overall.
+	// zero or negative == no limit
+	queryTotalLimit int64
 )
 
 func init() {
+	queryPipeLimit = getLimitFromEnvVar(envQueryPipeLimit)
+	queryTotalLimit = getLimitFromEnvVar(envQueryTotalLimit)
+}
+
+func getLimitFromEnvVar(envVarName string) int64 {
 	var (
-		parsedQueryPipeLimit int64
-		err                  error
+		parsedLimit int64
+		err         error
 	)
 
-	if qpl := os.Getenv(envQueryPipeLimit); qpl != "" {
-		parsedQueryPipeLimit, err = strconv.ParseInt(qpl, 10, 0)
+	if qpl := os.Getenv(envVarName); qpl != "" {
+		parsedLimit, err = strconv.ParseInt(qpl, 10, 0)
 		if err != nil {
-			panic(fmt.Sprintf("Cannot parse %s as int: %v", envQueryPipeLimit, err))
+			panic(fmt.Sprintf("Cannot parse %s as int: %v", envVarName, err))
 		}
 	}
 
-	if parsedQueryPipeLimit <= 0 {
-		queryPipeLimit = 0
-	} else {
-		queryPipeLimit = parsedQueryPipeLimit
-	}
+	fmt.Printf("%s: %s\n", envVarName, LimitToHuman(parsedLimit))
 
-	fmt.Printf("QUERY_PIPE_LIMIT: %s\n", byteCountToHuman(queryPipeLimit))
-	return
+	if parsedLimit <= 0 {
+		return 0
+	} else {
+		return parsedLimit
+	}
 }
 
-func byteCountToHuman(n int64) string {
+func LimitToHuman(n int64) string {
+	if n <= 0 {
+		return "OFF"
+	}
+
+	return ByteCountToHuman(n)
+}
+
+func ByteCountToHuman(n int64) string {
 	const (
-		kb  = 1000
-		mb  = 1000 * kb
-		gb  = 1000 * mb
-		tb  = 1000 * gb
+		kb = 1000
+		mb = 1000 * kb
+		gb = 1000 * mb
+		tb = 1000 * gb
 	)
 
 	switch {
@@ -56,9 +73,7 @@ func byteCountToHuman(n int64) string {
 		return fmt.Sprintf("%.2fMB", float64(n)/float64(mb))
 	case n >= kb:
 		return fmt.Sprintf("%.2fKB", float64(n)/float64(kb))
-	case n > 0:
-		return fmt.Sprintf("%d bytes", n)
 	default:
-		return "OFF"
+		return fmt.Sprintf("%d bytes", n)
 	}
 }
