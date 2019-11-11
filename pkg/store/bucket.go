@@ -14,7 +14,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
@@ -33,6 +35,7 @@ import (
 	"github.com/thanos-io/thanos/pkg/compact/downsample"
 	"github.com/thanos-io/thanos/pkg/component"
 	"github.com/thanos-io/thanos/pkg/extprom"
+	"github.com/thanos-io/thanos/pkg/limit"
 	"github.com/thanos-io/thanos/pkg/model"
 	"github.com/thanos-io/thanos/pkg/objstore"
 	"github.com/thanos-io/thanos/pkg/pool"
@@ -642,6 +645,8 @@ func (s *bucketSeriesSet) Err() error {
 	return s.err
 }
 
+var blockSeriesCallCount = int64(0)
+
 func blockSeries(
 	ctx context.Context,
 	ulid ulid.ULID,
@@ -651,14 +656,147 @@ func blockSeries(
 	matchers []labels.Matcher,
 	req *storepb.SeriesRequest,
 	samplesLimiter *Limiter,
+	limiter limit.Limiter,
 ) (storepb.SeriesSet, *queryStats, error) {
+	{
+		thisCallNumber := atomic.AddInt64(&blockSeriesCallCount, 1)
+		runutil.HeapDump(fmt.Sprintf("heap-blockSeries-%d-before", thisCallNumber))
+		defer runutil.HeapDump(fmt.Sprintf("heap-blockSeries-%d-after", thisCallNumber))
+	}
+
+	defer func() {
+		fmt.Printf("LOCAL LIMITER: limit=%s, current=%s\n", limit.LimitToHuman(limiter.Limit()), limit.ByteCountToHuman(limiter.Current()))
+	}()
+
+	memStats := runutil.NewMemStats()
+	defer memStats.Dump("blockSeries")
+
+	res, stats, err := blockSeries_REAL(ctx, ulid, extLset, indexr, chunkr, matchers, req, samplesLimiter, limiter)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return newBucketSeriesSet(res), indexr.stats.merge(stats), nil
+}
+
+func lsetSize(labelSet []storepb.Label) int64 {
+	size := int64(0)
+	size += int64(cap(labelSet)) * int64(unsafe.Sizeof(storepb.Label{}))
+
+	//for i := 0; i < len(labelSet); i++ {
+	//	label := &labelSet[i]
+	//	size += int64(len(label.Name))
+	//	size += int64(len(label.Value))
+	//}
+	return size
+}
+
+func refSetSize(refSet []uint64) int64 {
+	size := int64(0)
+	size += int64(cap(refSet)) * int64(unsafe.Sizeof(uint64(0)))
+	return size
+}
+
+func chunkSetSize(chunkSet []storepb.AggrChunk) int64 {
+	size := int64(0)
+	size += int64(cap(chunkSet)) * int64(unsafe.Sizeof(storepb.AggrChunk{}))
+
+	for i := 0; i < len(chunkSet); i++ {
+		size += aggrChunkDataSize(&chunkSet[i])
+	}
+	return size
+}
+
+func aggrChunkDataSize(aggrChunk *storepb.AggrChunk) int64 {
+	chunkSize := func(chunk *storepb.Chunk) int64 {
+		if chunk == nil {
+			return 0
+		}
+
+		size := int64(0)
+		size += int64(unsafe.Sizeof(storepb.Chunk{}))
+		size += int64(cap(chunk.Data))
+		return size
+	}
+
+	size := int64(0)
+	size += chunkSize(aggrChunk.Raw)
+	size += chunkSize(aggrChunk.Count)
+	size += chunkSize(aggrChunk.Sum)
+	size += chunkSize(aggrChunk.Min)
+	size += chunkSize(aggrChunk.Max)
+	size += chunkSize(aggrChunk.Counter)
+	return size
+}
+
+func getSize(resArray []seriesEntry) int64 {
+	size := int64(0)
+
+	size += int64(cap(resArray)) * int64(unsafe.Sizeof(seriesEntry{}))
+	for i := 0; i < len(resArray); i++ {
+		res := &resArray[i]
+		size += lsetSize(res.lset)
+		size += chunkSetSize(res.chks)
+		size += refSetSize(res.refs)
+	}
+
+	return size
+}
+
+func blockSeries_REAL(
+	ctx context.Context,
+	ulid ulid.ULID,
+	extLset map[string]string,
+	indexr *bucketIndexReader,
+	chunkr *bucketChunkReader,
+	matchers []labels.Matcher,
+	req *storepb.SeriesRequest,
+	samplesLimiter *Limiter,
+	limiter limit.Limiter,
+) ([]seriesEntry, *queryStats, error) {
+
+	labelSize := func(label *storepb.Label) int64 {
+		size := int64(0)
+		size += int64(unsafe.Sizeof(storepb.Label{}))
+		size += int64(len(label.Name))
+		size += int64(len(label.Value))
+		return size
+	}
+
+	aggrChunkSize := func(aggrChunk *storepb.AggrChunk) int64 {
+
+		chunkSize := func(chunk *storepb.Chunk) int64 {
+			if chunk == nil {
+				return 0
+			}
+			size := int64(0)
+			size += int64(unsafe.Sizeof(storepb.Chunk{}))
+			size += int64(len(chunk.Data))
+			return size
+		}
+
+		size := int64(0)
+		size += int64(unsafe.Sizeof(storepb.AggrChunk{}))
+		size += chunkSize(aggrChunk.Raw)
+		size += chunkSize(aggrChunk.Count)
+		size += chunkSize(aggrChunk.Sum)
+		size += chunkSize(aggrChunk.Min)
+		size += chunkSize(aggrChunk.Max)
+		size += chunkSize(aggrChunk.Counter)
+		return size
+	}
+
 	ps, err := indexr.ExpandedPostings(matchers)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "expanded matching posting")
 	}
 
 	if len(ps) == 0 {
-		return storepb.EmptySeriesSet(), indexr.stats, nil
+		return []seriesEntry{}, indexr.stats, nil
+	}
+
+	if err := limiter.Add(int64(8 * len(ps))); err != nil {
+		return nil, nil, err
 	}
 
 	// Preload all series index data.
@@ -690,22 +828,44 @@ func blockSeries(
 			if extLset[l.Name] != "" {
 				continue
 			}
-			s.lset = append(s.lset, storepb.Label{
+
+			label := storepb.Label{
 				Name:  l.Name,
 				Value: l.Value,
-			})
+			}
+
+			// limiter: s.lset
+			{
+				if err := limiter.Add(labelSize(&label)); err != nil {
+					return nil, nil, err
+				}
+			}
+
+			s.lset = append(s.lset, label)
 		}
+
 		for ln, lv := range extLset {
-			s.lset = append(s.lset, storepb.Label{
+			label := storepb.Label{
 				Name:  ln,
 				Value: lv,
-			})
+			}
+
+			// limiter: s.lset
+			{
+				if err := limiter.Add(labelSize(&label)); err != nil {
+					return nil, nil, err
+				}
+			}
+
+			s.lset = append(s.lset, label)
 		}
+
 		sort.Slice(s.lset, func(i, j int) bool {
 			return s.lset[i].Name < s.lset[j].Name
 		})
 
 		for _, meta := range chks {
+
 			if meta.MaxTime < req.MinTime {
 				continue
 			}
@@ -721,9 +881,26 @@ func blockSeries(
 				MaxTime: meta.MaxTime,
 			})
 			s.refs = append(s.refs, meta.Ref)
+
+			// limiter: s.refs
+			{
+				refSize := int64(unsafe.Sizeof(uint64(0)))
+				if err := limiter.Add(refSize); err != nil {
+					return nil, nil, err
+				}
+			}
 		}
+
 		if len(s.chks) > 0 {
 			res = append(res, s)
+
+			// limiter: res
+			{
+				size := int64(unsafe.Sizeof(seriesEntry{}))
+				if err := limiter.Add(size); err != nil {
+					return nil, nil, err
+				}
+			}
 		}
 	}
 
@@ -742,10 +919,18 @@ func blockSeries(
 			if err := populateChunk(&s.chks[i], chk, req.Aggregates); err != nil {
 				return nil, nil, errors.Wrap(err, "populate chunk")
 			}
+
+			// limiter: s.chks
+			{
+				aggrChunkSize := aggrChunkSize(&s.chks[i])
+				if err := limiter.Add(aggrChunkSize); err != nil {
+					return nil, nil, err
+				}
+			}
 		}
 	}
 
-	return newBucketSeriesSet(res), indexr.stats.merge(chunkr.stats), nil
+	return res, indexr.stats.merge(chunkr.stats), nil
 }
 
 func populateChunk(out *storepb.AggrChunk, in chunkenc.Chunk, aggrs []storepb.Aggr) error {
@@ -833,6 +1018,12 @@ func debugFoundBlockSetOverview(logger log.Logger, mint, maxt, maxResolutionMill
 
 // Series implements the storepb.StoreServer interface.
 func (s *BucketStore) Series(req *storepb.SeriesRequest, srv storepb.Store_SeriesServer) (err error) {
+	totalLimiter := limit.NewLimiterAtomic(limit.QueryTotalLimit())
+	defer func() {
+		fmt.Printf("TOTAL LIMITER: limit=%s, current=%s\n", limit.LimitToHuman(totalLimiter.Limit()), limit.ByteCountToHuman(totalLimiter.Current()))
+	}()
+
+
 	{
 		span, _ := tracing.StartSpan(srv.Context(), "store_query_gate_ismyturn")
 		err := s.queryGate.IsMyTurn(srv.Context())
@@ -859,6 +1050,7 @@ func (s *BucketStore) Series(req *storepb.SeriesRequest, srv storepb.Store_Serie
 
 	s.mtx.RLock()
 
+	memStats := runutil.NewMemStats()
 	for _, bs := range s.blockSets {
 		blockMatchers, ok := bs.labelMatchers(matchers...)
 		if !ok {
@@ -883,7 +1075,34 @@ func (s *BucketStore) Series(req *storepb.SeriesRequest, srv storepb.Store_Serie
 			defer runutil.CloseWithLogOnErr(s.logger, indexr, "series block")
 			defer runutil.CloseWithLogOnErr(s.logger, chunkr, "series block")
 
-			g.Go(func() error {
+			//g.Go(func() error {
+			//	limiter := limit.NewLimiterPropagator(limit.NewLimiterNoLock(limit.QueryTotalLimit()), totalLimiter)
+			//
+			//	part, pstats, err := blockSeries(ctx,
+			//		b.meta.ULID,
+			//		b.meta.Thanos.Labels,
+			//		indexr,
+			//		chunkr,
+			//		blockMatchers,
+			//		req,
+			//		s.samplesLimiter,
+			//		limiter,
+			//	)
+			//	if err != nil {
+			//		return errors.Wrapf(err, "fetch series for block %s", b.meta.ULID)
+			//	}
+			//
+			//	mtx.Lock()
+			//	res = append(res, part)
+			//	stats = stats.merge(pstats)
+			//	mtx.Unlock()
+			//
+			//	return nil
+			//})
+
+			{
+				limiter := limit.NewLimiterPropagator(limit.NewLimiterNoLock(limit.QueryTotalLimit()), totalLimiter)
+
 				part, pstats, err := blockSeries(ctx,
 					b.meta.ULID,
 					b.meta.Thanos.Labels,
@@ -892,6 +1111,7 @@ func (s *BucketStore) Series(req *storepb.SeriesRequest, srv storepb.Store_Serie
 					blockMatchers,
 					req,
 					s.samplesLimiter,
+					limiter,
 				)
 				if err != nil {
 					return errors.Wrapf(err, "fetch series for block %s", b.meta.ULID)
@@ -901,11 +1121,11 @@ func (s *BucketStore) Series(req *storepb.SeriesRequest, srv storepb.Store_Serie
 				res = append(res, part)
 				stats = stats.merge(pstats)
 				mtx.Unlock()
+			}
 
-				return nil
-			})
 		}
 	}
+	memStats.Dump("Series - after loop")
 
 	s.mtx.RUnlock()
 
@@ -953,6 +1173,7 @@ func (s *BucketStore) Series(req *storepb.SeriesRequest, srv storepb.Store_Serie
 		// Chunks of returned series might be out of order w.r.t to their time range.
 		// This must be accounted for later by clients.
 		set := storepb.MergeSeriesSets(res...)
+
 		for set.Next() {
 			var series storepb.Series
 

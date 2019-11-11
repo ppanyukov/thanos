@@ -49,6 +49,42 @@ func NewLimiterAtomic(limit int64) Limiter {
 	}
 }
 
+func NewLimiterPropagator(limiter Limiter, parents ...Limiter) Limiter {
+	return &limiterPropagator{
+		limiter: limiter,
+		parents: parents,
+	}
+}
+
+type limiterPropagator struct {
+	limiter Limiter
+	parents []Limiter
+}
+
+func (l *limiterPropagator) Add(n int64) error {
+
+	if err := l.limiter.Add(n); err != nil {
+		return err
+	}
+
+	for _, limiter := range l.parents {
+		if err := limiter.Add(n); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (l *limiterPropagator) Limit() int64 {
+	return l.limiter.Limit()
+}
+
+func (l *limiterPropagator) Current() int64 {
+	return l.limiter.Current()
+}
+
+
 type emptyLimiter struct {
 }
 

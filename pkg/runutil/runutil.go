@@ -47,17 +47,66 @@
 package runutil
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
+	"runtime"
+	"runtime/pprof"
 	"time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/pkg/errors"
 	tsdberrors "github.com/prometheus/prometheus/tsdb/errors"
+	"github.com/thanos-io/thanos/pkg/limit"
 )
+
+func HeapDump(name string) {
+	var fName = fmt.Sprintf("/Users/philip/thanos/github.com/ppanyukov/thanos-oom/scripts/%s.pb.gz", name)
+	f, _ := os.Create(fName)
+	defer f.Close()
+	runtime.GC()
+	pprof.WriteHeapProfile(f)
+	fmt.Printf("WRITTEN HEAP DUMP TO %s\n", fName)
+}
+
+type MemStats interface {
+	Dump(name string)
+}
+
+func NewMemStats() MemStats {
+	runtime.GC()
+	memStatsBefore := runtime.MemStats{}
+	runtime.ReadMemStats(&memStatsBefore)
+	return &memstatsDumper{
+		start: memStatsBefore,
+	}
+}
+
+type memstatsDumper struct {
+	start runtime.MemStats
+}
+
+func (m *memstatsDumper) Dump(name string) {
+	runtime.GC()
+	memStatsBefore := m.start
+	memStatsAfter := runtime.MemStats{}
+	runtime.ReadMemStats(&memStatsAfter)
+
+	heapAlloc := int64(memStatsAfter.HeapAlloc - memStatsBefore.HeapAlloc)
+	heapObjects := int64(memStatsAfter.HeapObjects - memStatsBefore.HeapObjects)
+	mallocs := int64(memStatsAfter.Mallocs - memStatsBefore.Mallocs)
+
+	buffer := &bytes.Buffer{}
+	_, _ = fmt.Fprintf(buffer, "MEM STATS: %s\n", name)
+	_, _ = fmt.Fprintf(buffer, "    HeapAlloc: %s\n", limit.ByteCountToHuman(heapAlloc))
+	_, _ = fmt.Fprintf(buffer, "    NumGC: %d\n", memStatsAfter.NumGC-memStatsBefore.NumGC)
+	_, _ = fmt.Fprintf(buffer, "    HeapObjects: %s\n", limit.ByteCountToHuman(heapObjects))
+	_, _ = fmt.Fprintf(buffer, "    Mallocs: %s\n", limit.ByteCountToHuman(mallocs))
+	_, _ = os.Stdout.Write(buffer.Bytes())
+}
 
 // Repeat executes f every interval seconds until stopc is closed or f returns an error.
 // It executes f once right after being called.
