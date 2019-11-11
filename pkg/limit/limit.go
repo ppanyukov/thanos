@@ -2,7 +2,7 @@ package limit
 
 import (
 	"fmt"
-	"math"
+	"sync/atomic"
 )
 
 // QueryPipeLimit returns the number of bytes querier can receive from one given source.
@@ -23,11 +23,11 @@ type Limiter interface {
 	Current() int64
 }
 
-// NewLimiterNoLock creates new limiter which does not use locks.
+// NewLimiterNoLock creates new limiter which does not use any locks.
 // Not safe use across several goroutines.
 func NewLimiterNoLock(limit int64) Limiter {
 	if limit <= 0 {
-		return &emptyLimiter{}
+		return &limiterNoop{}
 	}
 
 	return &limiterNoLock{
@@ -36,11 +36,11 @@ func NewLimiterNoLock(limit int64) Limiter {
 	}
 }
 
-// NewLimiterAtomic creates new total query limiter which uses atomic assignments.
+// NewLimiterAtomic creates new limiter which uses atomic increments.
 // Safe to use across several goroutines.
 func NewLimiterAtomic(limit int64) Limiter {
 	if limit <= 0 {
-		return &emptyLimiter{}
+		return &limiterNoop{}
 	}
 
 	return &limiterAtomic{
@@ -49,20 +49,20 @@ func NewLimiterAtomic(limit int64) Limiter {
 	}
 }
 
-func NewLimiterPropagator(limiter Limiter, parents ...Limiter) Limiter {
-	return &limiterPropagator{
+// NewLimiterChain wraps a limiter to propagate counters to zero or more parents.
+func NewLimiterChain(limiter Limiter, parents ...Limiter) Limiter {
+	return &limiterChain{
 		limiter: limiter,
 		parents: parents,
 	}
 }
 
-type limiterPropagator struct {
+type limiterChain struct {
 	limiter Limiter
 	parents []Limiter
 }
 
-func (l *limiterPropagator) Add(n int64) error {
-
+func (l *limiterChain) Add(n int64) error {
 	if err := l.limiter.Add(n); err != nil {
 		return err
 	}
@@ -76,27 +76,27 @@ func (l *limiterPropagator) Add(n int64) error {
 	return nil
 }
 
-func (l *limiterPropagator) Limit() int64 {
+func (l *limiterChain) Limit() int64 {
 	return l.limiter.Limit()
 }
 
-func (l *limiterPropagator) Current() int64 {
+func (l *limiterChain) Current() int64 {
 	return l.limiter.Current()
 }
 
 
-type emptyLimiter struct {
+type limiterNoop struct {
 }
 
-func (limiter *emptyLimiter) Add(n int64) error {
+func (limiter *limiterNoop) Add(n int64) error {
 	return nil
 }
 
-func (limiter *emptyLimiter) Limit() int64 {
-	return math.MaxInt64
+func (limiter *limiterNoop) Limit() int64 {
+	return 0
 }
 
-func (limiter *emptyLimiter) Current() int64 {
+func (limiter *limiterNoop) Current() int64 {
 	return 0
 }
 
@@ -128,8 +128,8 @@ type limiterAtomic struct {
 }
 
 func (limiter *limiterAtomic) Add(n int64) error {
-	limiter.current += n
-	if limiter.current > limiter.limit {
+	current := atomic.AddInt64(&limiter.current, n)
+	if current > limiter.limit {
 		return fmt.Errorf("limit reached: current=%s limit=%s", ByteCountToHuman(limiter.current), LimitToHuman(limiter.limit))
 	}
 
@@ -141,5 +141,5 @@ func (limiter *limiterAtomic) Limit() int64 {
 }
 
 func (limiter *limiterAtomic) Current() int64 {
-	return limiter.current
+	return atomic.LoadInt64(&limiter.current)
 }

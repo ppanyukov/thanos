@@ -1076,7 +1076,7 @@ func (s *BucketStore) Series(req *storepb.SeriesRequest, srv storepb.Store_Serie
 			defer runutil.CloseWithLogOnErr(s.logger, chunkr, "series block")
 
 			//g.Go(func() error {
-			//	limiter := limit.NewLimiterPropagator(limit.NewLimiterNoLock(limit.QueryTotalLimit()), totalLimiter)
+			//	limiter := limit.NewLimiterChain(limit.NewLimiterNoLock(limit.QueryTotalLimit()), totalLimiter)
 			//
 			//	part, pstats, err := blockSeries(ctx,
 			//		b.meta.ULID,
@@ -1101,7 +1101,7 @@ func (s *BucketStore) Series(req *storepb.SeriesRequest, srv storepb.Store_Serie
 			//})
 
 			{
-				limiter := limit.NewLimiterPropagator(limit.NewLimiterNoLock(limit.QueryTotalLimit()), totalLimiter)
+				limiter := limit.NewLimiterChain(limit.NewLimiterNoLock(limit.QueryTotalLimit()), totalLimiter)
 
 				part, pstats, err := blockSeries(ctx,
 					b.meta.ULID,

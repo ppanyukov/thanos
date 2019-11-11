@@ -259,10 +259,11 @@ func (s *ProxyStore) Series(r *storepb.SeriesRequest, srv storepb.Store_SeriesSe
 				continue
 			}
 
+			aggregateLimiter := limit.NewLimiterChain(limit.NewLimiterNoLock(limit.QueryPipeLimit()), queryTotalLimiter)
 			// Schedule streamSeriesSet that translates gRPC streamed response
 			// into seriesSet (if series) or respCh if warnings.
 			seriesSet = append(seriesSet, startStreamSeriesSet(seriesCtx, s.logger, closeSeries,
-				wg, sc, respSender, st.String(), !r.PartialResponseDisabled, s.responseTimeout, queryTotalLimiter))
+				wg, sc, respSender, st.String(), !r.PartialResponseDisabled, s.responseTimeout, aggregateLimiter))
 		}
 
 		level.Debug(s.logger).Log("msg", strings.Join(storeDebugMsgs, ";"))
@@ -354,7 +355,7 @@ func startStreamSeriesSet(
 		defer wg.Done()
 		defer close(s.recvCh)
 
-		localLimiter := limit.NewLimiterNoLock(limit.QueryPipeLimit())
+
 
 		for {
 			r, err := s.stream.Recv()
@@ -368,17 +369,9 @@ func startStreamSeriesSet(
 			// Check receive limits but only if err == nil not to mask any
 			// real issues with limit enforcement errors.
 			if err == nil {
-				err = localLimiter.Add(receivedSized)
-				if err != nil {
-					level.Info(logger).Log("QUERY_PIPE_LIMIT", "limit reached", "msg", err)
-				}
-			}
-
-			// Also notify upstream limiter
-			if err == nil {
 				err = limiter.Add(receivedSized)
 				if err != nil {
-					level.Info(logger).Log("QUERY_TOTAL_LIMIT", "limit reached", "msg", err)
+					level.Info(logger).Log("QUERY_PIPE_LIMIT", "limit reached", "msg", err)
 				}
 			}
 
