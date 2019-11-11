@@ -679,70 +679,6 @@ func blockSeries(
 	return newBucketSeriesSet(res), indexr.stats.merge(stats), nil
 }
 
-func lsetSize(labelSet []storepb.Label) int64 {
-	size := int64(0)
-	size += int64(cap(labelSet)) * int64(unsafe.Sizeof(storepb.Label{}))
-
-	//for i := 0; i < len(labelSet); i++ {
-	//	label := &labelSet[i]
-	//	size += int64(len(label.Name))
-	//	size += int64(len(label.Value))
-	//}
-	return size
-}
-
-func refSetSize(refSet []uint64) int64 {
-	size := int64(0)
-	size += int64(cap(refSet)) * int64(unsafe.Sizeof(uint64(0)))
-	return size
-}
-
-func chunkSetSize(chunkSet []storepb.AggrChunk) int64 {
-	size := int64(0)
-	size += int64(cap(chunkSet)) * int64(unsafe.Sizeof(storepb.AggrChunk{}))
-
-	for i := 0; i < len(chunkSet); i++ {
-		size += aggrChunkDataSize(&chunkSet[i])
-	}
-	return size
-}
-
-func aggrChunkDataSize(aggrChunk *storepb.AggrChunk) int64 {
-	chunkSize := func(chunk *storepb.Chunk) int64 {
-		if chunk == nil {
-			return 0
-		}
-
-		size := int64(0)
-		size += int64(unsafe.Sizeof(storepb.Chunk{}))
-		size += int64(cap(chunk.Data))
-		return size
-	}
-
-	size := int64(0)
-	size += chunkSize(aggrChunk.Raw)
-	size += chunkSize(aggrChunk.Count)
-	size += chunkSize(aggrChunk.Sum)
-	size += chunkSize(aggrChunk.Min)
-	size += chunkSize(aggrChunk.Max)
-	size += chunkSize(aggrChunk.Counter)
-	return size
-}
-
-func getSize(resArray []seriesEntry) int64 {
-	size := int64(0)
-
-	size += int64(cap(resArray)) * int64(unsafe.Sizeof(seriesEntry{}))
-	for i := 0; i < len(resArray); i++ {
-		res := &resArray[i]
-		size += lsetSize(res.lset)
-		size += chunkSetSize(res.chks)
-		size += refSetSize(res.refs)
-	}
-
-	return size
-}
-
 func blockSeries_REAL(
 	ctx context.Context,
 	ulid ulid.ULID,
@@ -1022,7 +958,6 @@ func (s *BucketStore) Series(req *storepb.SeriesRequest, srv storepb.Store_Serie
 	defer func() {
 		fmt.Printf("TOTAL LIMITER: limit=%s, current=%s\n", limit.LimitToHuman(totalLimiter.Limit()), limit.ByteCountToHuman(totalLimiter.Current()))
 	}()
-
 
 	{
 		span, _ := tracing.StartSpan(srv.Context(), "store_query_gate_ismyturn")

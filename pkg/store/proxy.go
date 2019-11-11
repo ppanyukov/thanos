@@ -364,6 +364,7 @@ func startStreamSeriesSet(
 				return
 			}
 
+			// TODO(ppanyukov): this is slow!
 			receivedSized := int64(r.Size())
 
 			// Check receive limits but only if err == nil not to mask any
