@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
@@ -18,6 +19,7 @@ import (
 	"github.com/prometheus/prometheus/tsdb/labels"
 	"github.com/thanos-io/thanos/pkg/component"
 	"github.com/thanos-io/thanos/pkg/limit"
+	"github.com/thanos-io/thanos/pkg/runutil"
 	"github.com/thanos-io/thanos/pkg/store/storepb"
 	"github.com/thanos-io/thanos/pkg/strutil"
 	"github.com/thanos-io/thanos/pkg/tracing"
@@ -182,6 +184,11 @@ func (s ctxRespSender) send(r *storepb.SeriesResponse) {
 // Series returns all series for a requested time range and label matcher. Requested series are taken from other
 // stores and proxied to RPC client. NOTE: Resulted data are not trimmed exactly to min and max time range.
 func (s *ProxyStore) Series(r *storepb.SeriesRequest, srv storepb.Store_SeriesServer) error {
+	queryTotalLimiter := limit.NewLimiterAtomic(limit.QueryTotalLimit())
+	defer func() {
+		fmt.Printf("TOTAL LIMITER: limit=%s, current=%s\n", limit.LimitToHuman(queryTotalLimiter.Limit()), limit.ByteCountToHuman(queryTotalLimiter.Current()))
+	}()
+
 	match, newMatchers, err := matchesExternalLabels(r.Matchers, s.selectorLabels)
 	if err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
@@ -202,9 +209,8 @@ func (s *ProxyStore) Series(r *storepb.SeriesRequest, srv storepb.Store_SeriesSe
 		respSender, respRecv, closeFn = newRespCh(gctx, 10)
 	)
 
-	queryTotalLimiter := limit.NewLimiterAtomic(limit.QueryTotalLimit())
-
 	g.Go(func() error {
+
 		var (
 			seriesSet      []storepb.SeriesSet
 			storeDebugMsgs []string
@@ -223,6 +229,8 @@ func (s *ProxyStore) Series(r *storepb.SeriesRequest, srv storepb.Store_SeriesSe
 			wg.Wait()
 			closeFn()
 		}()
+
+		memStats := runutil.NewMemStats()
 
 		for _, st := range s.stores() {
 			// We might be able to skip the store if its meta information indicates
@@ -281,6 +289,9 @@ func (s *ProxyStore) Series(r *storepb.SeriesRequest, srv storepb.Store_SeriesSe
 			series.Labels, series.Chunks = mergedSet.At()
 			respSender.send(storepb.NewSeriesResponse(&series))
 		}
+
+		memStats.Dump("AFTER QUERY")
+
 		return mergedSet.Err()
 	})
 
@@ -350,12 +361,34 @@ func startStreamSeriesSet(
 		responseTimeout: responseTimeout,
 	}
 
+	getApproxSize := func(r *storepb.SeriesResponse) int64 {
+		size := int64(0)
+		size += int64(unsafe.Sizeof(storepb.SeriesResponse{}))
+		size += int64(len(r.XXX_unrecognized))
+		size += int64(len(r.GetWarning()))
+
+		s := r.GetSeries()
+		size += int64(unsafe.Sizeof(storepb.Series{}))
+		size += int64(len(s.XXX_unrecognized))
+		size += int64(len(s.Chunks)) * int64(unsafe.Sizeof(storepb.AggrChunk{}))
+		size += int64(len(s.Labels)) * int64(unsafe.Sizeof(storepb.Label{}))
+
+		// approximate the length of each label being about 20 chars, e.g. "k8s_app_metric0"
+		const approxLabelLen = int64(10)
+		size += approxLabelLen * int64(len(s.Labels))
+
+
+		// approximate the size if chunks by having 120 bytes in each?
+		const approxChunkLen = int64(120)
+		size += approxChunkLen * int64(len(s.Chunks))
+
+		return size
+	}
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		defer close(s.recvCh)
-
-
 
 		for {
 			r, err := s.stream.Recv()
@@ -365,7 +398,8 @@ func startStreamSeriesSet(
 			}
 
 			// TODO(ppanyukov): this is slow!
-			receivedSized := int64(r.Size())
+			//receivedSized := int64(r.Size())
+			receivedSized := getApproxSize(r)
 
 			// Check receive limits but only if err == nil not to mask any
 			// real issues with limit enforcement errors.
