@@ -731,8 +731,11 @@ func blockSeries_REAL(
 		return []seriesEntry{}, indexr.stats, nil
 	}
 
-	if err := limiter.Add(int64(8 * len(ps))); err != nil {
-		return nil, nil, err
+	// limiter: ps
+	{
+		if err := limiter.Add(int64(8 * len(ps))); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	// Preload all series index data.
@@ -750,6 +753,10 @@ func blockSeries_REAL(
 		chks []chunks.Meta
 	)
 	for _, id := range ps {
+		// Collect query size at a coarser level of posting to avoid
+		// hammering the limiter with loads of calls.
+		querySize := int64(0)
+
 		if err := indexr.LoadedSeries(id, &lset, &chks); err != nil {
 			return nil, nil, errors.Wrap(err, "read series")
 		}
@@ -772,9 +779,7 @@ func blockSeries_REAL(
 
 			// limiter: s.lset
 			{
-				if err := limiter.Add(labelSize(&label)); err != nil {
-					return nil, nil, err
-				}
+				querySize += labelSize(&label)
 			}
 
 			s.lset = append(s.lset, label)
@@ -788,9 +793,7 @@ func blockSeries_REAL(
 
 			// limiter: s.lset
 			{
-				if err := limiter.Add(labelSize(&label)); err != nil {
-					return nil, nil, err
-				}
+				querySize += labelSize(&label)
 			}
 
 			s.lset = append(s.lset, label)
@@ -817,14 +820,12 @@ func blockSeries_REAL(
 				MaxTime: meta.MaxTime,
 			})
 			s.refs = append(s.refs, meta.Ref)
+		}
 
-			// limiter: s.refs
-			{
-				refSize := int64(unsafe.Sizeof(uint64(0)))
-				if err := limiter.Add(refSize); err != nil {
-					return nil, nil, err
-				}
-			}
+		// limiter: s.refs
+		{
+			refSize := int64(len(s.refs)) * int64(unsafe.Sizeof(uint64(0)))
+			querySize += refSize
 		}
 
 		if len(s.chks) > 0 {
@@ -832,11 +833,12 @@ func blockSeries_REAL(
 
 			// limiter: res
 			{
-				size := int64(unsafe.Sizeof(seriesEntry{}))
-				if err := limiter.Add(size); err != nil {
-					return nil, nil, err
-				}
+				querySize += int64(unsafe.Sizeof(seriesEntry{}))
 			}
+		}
+
+		if err := limiter.Add(querySize); err != nil {
+			return nil, nil, err
 		}
 	}
 
@@ -847,6 +849,8 @@ func blockSeries_REAL(
 
 	// Transform all chunks into the response format.
 	for _, s := range res {
+		querySize := int64(0)
+
 		for i, ref := range s.refs {
 			chk, err := chunkr.Chunk(ref)
 			if err != nil {
@@ -858,11 +862,12 @@ func blockSeries_REAL(
 
 			// limiter: s.chks
 			{
-				aggrChunkSize := aggrChunkSize(&s.chks[i])
-				if err := limiter.Add(aggrChunkSize); err != nil {
-					return nil, nil, err
-				}
+				querySize += aggrChunkSize(&s.chks[i])
 			}
+		}
+
+		if err := limiter.Add(querySize); err != nil {
+			return nil, nil, err
 		}
 	}
 

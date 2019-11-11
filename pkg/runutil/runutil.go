@@ -78,6 +78,7 @@ type MemStats interface {
 
 func NewMemStats() MemStats {
 	runtime.GC()
+	time.Sleep(5*time.Second)
 	memStatsBefore := runtime.MemStats{}
 	runtime.ReadMemStats(&memStatsBefore)
 	return &memstatsDumper{
@@ -91,6 +92,7 @@ type memstatsDumper struct {
 
 func (m *memstatsDumper) Dump(name string) {
 	runtime.GC()
+	time.Sleep(5*time.Second)
 	memStatsBefore := m.start
 	memStatsAfter := runtime.MemStats{}
 	runtime.ReadMemStats(&memStatsAfter)
