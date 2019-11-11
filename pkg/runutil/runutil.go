@@ -51,9 +51,11 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"sort"
 	"time"
 
 	"github.com/go-kit/kit/log"
@@ -72,43 +74,131 @@ func HeapDump(name string) {
 	fmt.Printf("WRITTEN HEAP DUMP TO %s\n", fName)
 }
 
+// scaleHeapSample adjusts the data from a heap Sample to
+// account for its probability of appearing in the collected
+// data. heap profiles are a sampling of the memory allocations
+// requests in a program. We estimate the unsampled value by dividing
+// each collected sample by its probability of appearing in the
+// profile. heap profiles rely on a poisson process to determine
+// which samples to collect, based on the desired average collection
+// rate R. The probability of a sample of size S to appear in that
+// profile is 1-exp(-S/R).
+func scaleHeapSample(count, size, rate int64) (int64, int64) {
+	if count == 0 || size == 0 {
+		return 0, 0
+	}
+
+	if rate <= 1 {
+		// if rate==1 all samples were collected so no adjustment is needed.
+		// if rate<1 treat as unknown and skip scaling.
+		return count, size
+	}
+
+	avgSize := float64(size) / float64(count)
+	scale := 1 / (1 - math.Exp(-avgSize/float64(rate)))
+
+	return int64(float64(count) * scale), int64(float64(size) * scale)
+}
+
+
+// copypasta from pprof.WriteHeapProfile.
+// we only care for the total.
+func getHeapInternal() runtime.MemProfileRecord {
+	// Find out how many records there are (MemProfile(nil, true)),
+	// allocate that many records, and get the data.
+	// There's a race—more records might be added between
+	// the two calls—so allocate a few extra records for safety
+	// and also try again if we're very unlucky.
+	// The loop should only execute one iteration in the common case.
+	var p []runtime.MemProfileRecord
+	n, ok := runtime.MemProfile(nil, true)
+	for {
+		// Allocate room for a slightly bigger profile,
+		// in case a few more entries have been added
+		// since the call to MemProfile.
+		p = make([]runtime.MemProfileRecord, n+50)
+		n, ok = runtime.MemProfile(p, true)
+		if ok {
+			p = p[0:n]
+			break
+		}
+		// Profile grew; try again.
+	}
+
+	sort.Slice(p, func(i, j int) bool { return p[i].InUseBytes() > p[j].InUseBytes() })
+
+	var total runtime.MemProfileRecord
+	for i := range p {
+		r := &p[i]
+		total.AllocBytes += r.AllocBytes
+		total.AllocObjects += r.AllocObjects
+		total.FreeBytes += r.FreeBytes
+		total.FreeObjects += r.FreeObjects
+	}
+
+	return total
+}
+
+//func getHeapDelta(before runtime.MemProfileRecord, after runtime.MemProfileRecord) runtime.MemProfileRecord {
+//	return runtime.MemProfileRecord{
+//		AllocBytes:   after.AllocBytes - before.AllocBytes,
+//		FreeBytes:    after.FreeBytes - before.FreeBytes,
+//		AllocObjects: after.AllocObjects - before.AllocObjects,
+//		FreeObjects:  after.FreeObjects - before.FreeObjects,
+//	}
+//}
+
 type MemStats interface {
 	Dump(name string)
 }
 
 func NewMemStats() MemStats {
+	return newMemstatsDumper2()
+}
+
+func newMemstatsDumper2() MemStats {
+
 	runtime.GC()
-	time.Sleep(5*time.Second)
-	memStatsBefore := runtime.MemStats{}
-	runtime.ReadMemStats(&memStatsBefore)
-	return &memstatsDumper{
-		start: memStatsBefore,
+	time.Sleep(time.Second)
+	runtime.GC()
+	time.Sleep(time.Second)
+
+	return &memstatsDumper2{
+		start: getHeapInternal(),
 	}
 }
 
-type memstatsDumper struct {
-	start runtime.MemStats
+type memstatsDumper2 struct {
+	start runtime.MemProfileRecord
 }
 
-func (m *memstatsDumper) Dump(name string) {
+func (m *memstatsDumper2) Dump(name string) {
 	runtime.GC()
-	time.Sleep(5*time.Second)
-	memStatsBefore := m.start
-	memStatsAfter := runtime.MemStats{}
-	runtime.ReadMemStats(&memStatsAfter)
+	time.Sleep(time.Second)
+	runtime.GC()
+	time.Sleep(time.Second)
 
-	heapAlloc := int64(memStatsAfter.HeapAlloc - memStatsBefore.HeapAlloc)
-	heapObjects := int64(memStatsAfter.HeapObjects - memStatsBefore.HeapObjects)
-	mallocs := int64(memStatsAfter.Mallocs - memStatsBefore.Mallocs)
+
+	memStatsBefore := m.start
+	memStatsAfter := getHeapInternal()
+	//delta := getHeapDelta(memStatsBefore, memStatsAfter)
+
+	//allocObjectsBefore, allocBytesBefore := scaleHeapSample(memStatsBefore.AllocObjects, memStatsBefore.AllocBytes, int64(runtime.MemProfileRate))
+	inUseObjectsBefore, inUseBytesBefore := scaleHeapSample(memStatsBefore.InUseObjects(), memStatsBefore.InUseBytes(), int64(runtime.MemProfileRate))
+
+	//allocObjectsAfter, allocBytesAfter := scaleHeapSample(memStatsAfter.AllocObjects, memStatsAfter.AllocBytes, int64(runtime.MemProfileRate))
+	inUseObjectsAfter, inUseBytesAfter := scaleHeapSample(memStatsAfter.InUseObjects(), memStatsAfter.InUseBytes(), int64(runtime.MemProfileRate))
+
+	heapAlloc := int64(inUseBytesAfter - inUseBytesBefore)
+	heapObjects := int64(inUseObjectsAfter - inUseObjectsBefore)
 
 	buffer := &bytes.Buffer{}
 	_, _ = fmt.Fprintf(buffer, "MEM STATS: %s\n", name)
-	_, _ = fmt.Fprintf(buffer, "    HeapAlloc: %s\n", limit.ByteCountToHuman(heapAlloc))
-	_, _ = fmt.Fprintf(buffer, "    NumGC: %d\n", memStatsAfter.NumGC-memStatsBefore.NumGC)
-	_, _ = fmt.Fprintf(buffer, "    HeapObjects: %s\n", limit.ByteCountToHuman(heapObjects))
-	_, _ = fmt.Fprintf(buffer, "    Mallocs: %s\n", limit.ByteCountToHuman(mallocs))
+	_, _ = fmt.Fprintf(buffer, "    InUseBytes: %s\n", limit.ByteCountToHuman(heapAlloc))
+	_, _ = fmt.Fprintf(buffer, "    InUseObjects: %s\n", limit.ByteCountToHuman(heapObjects))
 	_, _ = os.Stdout.Write(buffer.Bytes())
 }
+
 
 // Repeat executes f every interval seconds until stopc is closed or f returns an error.
 // It executes f once right after being called.
