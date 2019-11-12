@@ -16,10 +16,10 @@ import (
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
+	"github.com/ppanyukov/go-dump/dump"
 	"github.com/prometheus/prometheus/tsdb/labels"
 	"github.com/thanos-io/thanos/pkg/component"
 	"github.com/thanos-io/thanos/pkg/limit"
-	"github.com/thanos-io/thanos/pkg/runutil"
 	"github.com/thanos-io/thanos/pkg/store/storepb"
 	"github.com/thanos-io/thanos/pkg/strutil"
 	"github.com/thanos-io/thanos/pkg/tracing"
@@ -230,7 +230,7 @@ func (s *ProxyStore) Series(r *storepb.SeriesRequest, srv storepb.Store_SeriesSe
 			closeFn()
 		}()
 
-		memStats := runutil.NewMemStats()
+		memStats := dump.NewMemProf("Query")
 
 		for _, st := range s.stores() {
 			// We might be able to skip the store if its meta information indicates
@@ -290,7 +290,7 @@ func (s *ProxyStore) Series(r *storepb.SeriesRequest, srv storepb.Store_SeriesSe
 			respSender.send(storepb.NewSeriesResponse(&series))
 		}
 
-		memStats.Dump("AFTER QUERY")
+		memStats.PrintDiff()
 
 		return mergedSet.Err()
 	})
@@ -376,7 +376,6 @@ func startStreamSeriesSet(
 		// approximate the length of each label being about 20 chars, e.g. "k8s_app_metric0"
 		const approxLabelLen = int64(10)
 		size += approxLabelLen * int64(len(s.Labels))
-
 
 		// approximate the size if chunks by having 120 bytes in each?
 		const approxChunkLen = int64(120)

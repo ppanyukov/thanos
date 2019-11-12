@@ -34,6 +34,7 @@ require (
 	github.com/opentracing/basictracer-go v1.0.0
 	github.com/opentracing/opentracing-go v1.1.0
 	github.com/pkg/errors v0.8.1
+	github.com/ppanyukov/go-dump v0.0.0-20191112160744-126c655c4bdb
 	github.com/prometheus/client_golang v1.2.1
 	github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4
 	github.com/prometheus/common v0.7.0
@@ -61,6 +62,10 @@ require (
 // so that we don't get errors about being incompatible with the Go proxies.
 // See https://github.com/thanos-io/thanos/issues/1415
 replace (
+	// github.com/ppanyukov/go-dump => /Users/philip/thanos/github.com/ppanyukov/go-dump
+	github.com/prometheus/client_golang => /Users/philip/thanos/github.com/prometheus/client_golang
+	github.com/prometheus/prometheus => /Users/philip/thanos/github.com/prometheus/prometheus
+
 	golang.org/x/sys => golang.org/x/sys v0.0.0-20190412213103-97732733099d // v0.0.0-20190425145619-16072639606e (multiple-value "golang.org/x/sys/windows".GetCurrentProcess() in single-value context) Required to build properly on windows for github.com/elastic/go-sysinfo.
 	k8s.io/api => k8s.io/api v0.0.0-20190620084959-7cf5895f2711
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.0.0-20190620085554-14e95df34f1f

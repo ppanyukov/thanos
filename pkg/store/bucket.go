@@ -22,6 +22,7 @@ import (
 	"github.com/go-kit/kit/log/level"
 	"github.com/oklog/ulid"
 	"github.com/pkg/errors"
+	"github.com/ppanyukov/go-dump/dump"
 	"github.com/prometheus/client_golang/prometheus"
 	promlabels "github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/pkg/relabel"
@@ -660,16 +661,16 @@ func blockSeries(
 ) (storepb.SeriesSet, *queryStats, error) {
 	{
 		thisCallNumber := atomic.AddInt64(&blockSeriesCallCount, 1)
-		runutil.HeapDump(fmt.Sprintf("heap-blockSeries-%d-before", thisCallNumber))
-		defer runutil.HeapDump(fmt.Sprintf("heap-blockSeries-%d-after", thisCallNumber))
+		dump.WriteHeapDump(fmt.Sprintf("heap-blockSeries-%d-before", thisCallNumber))
+		defer dump.WriteHeapDump(fmt.Sprintf("heap-blockSeries-%d-after", thisCallNumber))
 	}
 
 	defer func() {
 		fmt.Printf("LOCAL LIMITER: limit=%s, current=%s\n", limit.LimitToHuman(limiter.Limit()), limit.ByteCountToHuman(limiter.Current()))
 	}()
 
-	memStats := runutil.NewMemStats()
-	defer memStats.Dump("blockSeries")
+	memStats := dump.NewMemProf("blockSeries")
+	defer memStats.PrintDiff()
 
 	res, stats, err := blockSeries_REAL(ctx, ulid, extLset, indexr, chunkr, matchers, req, samplesLimiter, limiter)
 	if err != nil {
@@ -990,7 +991,7 @@ func (s *BucketStore) Series(req *storepb.SeriesRequest, srv storepb.Store_Serie
 
 	s.mtx.RLock()
 
-	memStats := runutil.NewMemStats()
+	memStats := dump.NewMemProf("Series")
 	for _, bs := range s.blockSets {
 		blockMatchers, ok := bs.labelMatchers(matchers...)
 		if !ok {
@@ -1065,7 +1066,7 @@ func (s *BucketStore) Series(req *storepb.SeriesRequest, srv storepb.Store_Serie
 
 		}
 	}
-	memStats.Dump("Series - after loop")
+	memStats.PrintDiff()
 
 	s.mtx.RUnlock()
 
